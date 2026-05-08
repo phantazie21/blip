@@ -1,0 +1,39 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.aps
+*.ncb
+*.sdf
+*.opensdf
+*.cachefile
+
+# Build output
+x64/
+x86/
+Debug/
+Release/
+ipch/
+*.ipch
+
+# Intermediate files
+*.obj
+*.pch
+*.pdb
+*.ilk
+*.idb
+*.iobj
+*.ipdb
+*.log
+*.tlog
+*.recipe
+*.lastbuildstate
+
+# Compiled output
+*.exe
+*.dll
+*.lib
+*.exp
+
+# Precompiled headers
+*.gch
