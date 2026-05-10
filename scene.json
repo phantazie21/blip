@@ -115,11 +115,34 @@
         "pitch": 0.0,
         "position": [
           0.0,
-          -0.0005109611083753407,
+          -0.0005109704216010869,
           5.0
         ],
         "roll": 0.0,
         "yaw": -0.8999999761581421
+      }
+    },
+    {
+      "components": [
+        {
+          "data": {
+            "path": "sound.wav",
+            "pitch": 1.0,
+            "playOnStart": true,
+            "volume": 1.0
+          },
+          "type": "AudioSource"
+        }
+      ],
+      "transform": {
+        "pitch": 0.0,
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roll": 0.0,
+        "yaw": 0.0
       }
     }
   ]

@@ -82,7 +82,7 @@ void Editor::drawInspector(Scene& scene) {
     }
 
     if (ImGui::BeginPopup("AddComponentPopup")) {
-        const char* types[] = { "MeshRenderer", "BoxCollider", "SphereCollider", "Rigidbody" };
+        const char* types[] = { "MeshRenderer", "BoxCollider", "SphereCollider", "Rigidbody", "AudioSource" };
         for (const char* t : types) {
             if (ImGui::Selectable(t)) {
                 auto comp = createComponent(t);

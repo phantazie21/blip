@@ -78,6 +78,8 @@ void App::run() {
             acc -= fixedDT;
         }
 
+		scene.update(dt);
+
         ImGui::SFML::Update(window, restart);
 		editor.draw(scene);
 

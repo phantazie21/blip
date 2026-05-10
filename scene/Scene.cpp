@@ -3,6 +3,12 @@
 #include <fstream>
 #include "Primitives.h"
 
+AudioSystem* g_audio = nullptr;
+
+Scene::Scene() {
+	g_audio = &audioSystem;
+}
+
 void Scene::save(const std::string& path) const {
 	json j;
 	j["objects"] = json::array();
@@ -70,9 +76,9 @@ int clipTriangleNearPlane(const ClipVert in[3], ClipVert out[4], float nearZ) {
 }
 
 void Scene::processFace(Mesh* mesh, const MeshRenderer* mr, const Face& f, Renderer& r, const Camera& cam, const Mat4& mv) {
-	ClipVert ca;
-	ClipVert cb;
-	ClipVert cc;
+	ClipVert ca{};
+	ClipVert cb{};
+	ClipVert cc{};
 	ca.camPos = mv * mesh->vertices[f.idx[0]];
 	cb.camPos = mv * mesh->vertices[f.idx[1]];
 	cc.camPos = mv * mesh->vertices[f.idx[2]];
@@ -211,6 +217,14 @@ void Scene::fixedUpdate(float dt) {
 				float vAlongN = dot(rbB->velocity, c.normal);
 				if (vAlongN > 0) rbB->velocity = rbB->velocity - c.normal * vAlongN;
 			}
+		}
+	}
+}
+
+void Scene::update(float dt) {
+	for (const auto& obj : objects) {
+		for (const auto& comp : obj->components) {
+			comp->update(dt);
 		}
 	}
 }
