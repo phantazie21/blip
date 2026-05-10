@@ -1,6 +1,259 @@
 #include "Rasterizer.h"
 #include "Renderer.h"
+#include <immintrin.h>
 
+static inline void processRow(
+    Renderer& r,
+    int rowStart, int minX, int maxX,
+    float w0_row, float w1_row, float w2_row,
+    float w0_dx, float w1_dx, float w2_dx,
+    float invZ_row, float invZ_dx,
+    float uoz_row, float voz_row, float ioz_row,
+    float uoz_dx, float voz_dx, float ioz_dx,
+    const Texture* texture, uint32_t color,
+    int texW, int texH, uint32_t* texData,
+    uint32_t* framebuffer)
+{
+    float w0 = w0_row, w1 = w1_row, w2 = w2_row;
+    int   idx = rowStart + minX;
+    float invZ = invZ_row;
+    float uoz = uoz_row;
+    float voz = voz_row;
+    float ioz = ioz_row;
+    bool  entered = false;
+
+    for (int x = minX; x <= maxX; x++) {
+        if (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f) {
+            entered = true;
+            if (invZ > r.depthBuffer[idx]) {
+                r.depthBuffer[idx] = invZ;
+                const float z = 1.0f / invZ;
+                const float intensity = ioz * z;
+                uint32_t finalColor;
+                if (texture) {
+                    const float u = uoz * z;
+                    const float v = voz * z;
+                    const float uClamped = u < 0 ? 0 : (u > 1 ? 1 : u);
+                    const float vClamped = v < 0 ? 0 : (v > 1 ? 1 : v);
+                    const int tx = (int)(uClamped * (texW - 1));
+                    const int ty = (int)(vClamped * (texH - 1));
+                    finalColor = applyIntensity(texData[ty * texW + tx], intensity);
+                }
+                else {
+                    finalColor = applyIntensity(color, intensity);
+                }
+                framebuffer[idx] = finalColor;
+            }
+        }
+        else if (entered) break;
+
+        w0 += w0_dx; w1 += w1_dx; w2 += w2_dx;
+        idx++;
+        invZ += invZ_dx;
+        uoz += uoz_dx;
+        voz += voz_dx;
+        ioz += ioz_dx;
+    }
+}
+
+static inline void processRow_AVX2(
+    Renderer& r,
+    int rowStart, int minX, int maxX,
+    float w0_row, float w1_row, float w2_row,
+    float w0_dx, float w1_dx, float w2_dx,
+    float invZ_row, float invZ_dx,
+    float uoz_row, float voz_row, float ioz_row,
+    float uoz_dx, float voz_dx, float ioz_dx,
+    const Texture* texture, uint32_t color,
+    int texW, int texH, uint32_t* texData,
+    uint32_t* framebuffer)
+{
+    // Lane offsets for initialization: each of the 8 lanes starts at column x+lane
+    const __m256 laneOffset = _mm256_set_ps(7, 6, 5, 4, 3, 2, 1, 0);
+
+    // Per-pixel deltas, broadcast to all 8 lanes
+    const __m256 v_w0_dx = _mm256_set1_ps(w0_dx);
+    const __m256 v_w1_dx = _mm256_set1_ps(w1_dx);
+    const __m256 v_w2_dx = _mm256_set1_ps(w2_dx);
+    const __m256 v_invZ_dx = _mm256_set1_ps(invZ_dx);
+    const __m256 v_uoz_dx = _mm256_set1_ps(uoz_dx);
+    const __m256 v_voz_dx = _mm256_set1_ps(voz_dx);
+    const __m256 v_ioz_dx = _mm256_set1_ps(ioz_dx);
+
+    // Step values: how much each variable changes when we advance 8 pixels
+    const __m256 v_eight = _mm256_set1_ps(8.0f);
+    const __m256 v_w0_step = _mm256_mul_ps(v_w0_dx, v_eight);
+    const __m256 v_w1_step = _mm256_mul_ps(v_w1_dx, v_eight);
+    const __m256 v_w2_step = _mm256_mul_ps(v_w2_dx, v_eight);
+    const __m256 v_invZ_step = _mm256_mul_ps(v_invZ_dx, v_eight);
+    const __m256 v_uoz_step = _mm256_mul_ps(v_uoz_dx, v_eight);
+    const __m256 v_voz_step = _mm256_mul_ps(v_voz_dx, v_eight);
+    const __m256 v_ioz_step = _mm256_mul_ps(v_ioz_dx, v_eight);
+
+    // Initial 8-lane values at the start of the scanline
+    __m256 v_w0 = _mm256_add_ps(_mm256_set1_ps(w0_row), _mm256_mul_ps(laneOffset, v_w0_dx));
+    __m256 v_w1 = _mm256_add_ps(_mm256_set1_ps(w1_row), _mm256_mul_ps(laneOffset, v_w1_dx));
+    __m256 v_w2 = _mm256_add_ps(_mm256_set1_ps(w2_row), _mm256_mul_ps(laneOffset, v_w2_dx));
+    __m256 v_invZ = _mm256_add_ps(_mm256_set1_ps(invZ_row), _mm256_mul_ps(laneOffset, v_invZ_dx));
+    __m256 v_uoz = _mm256_add_ps(_mm256_set1_ps(uoz_row), _mm256_mul_ps(laneOffset, v_uoz_dx));
+    __m256 v_voz = _mm256_add_ps(_mm256_set1_ps(voz_row), _mm256_mul_ps(laneOffset, v_voz_dx));
+    __m256 v_ioz = _mm256_add_ps(_mm256_set1_ps(ioz_row), _mm256_mul_ps(laneOffset, v_ioz_dx));
+
+    const __m256 v_zero = _mm256_setzero_ps();
+    const __m256 v_one = _mm256_set1_ps(1.0f);
+
+    // Pre-unpack the flat color once per scanline (only used in non-textured path)
+    const __m256 v_color_r = _mm256_set1_ps((float)(color & 0xff));
+    const __m256 v_color_g = _mm256_set1_ps((float)((color >> 8) & 0xff));
+    const __m256 v_color_b = _mm256_set1_ps((float)((color >> 16) & 0xff));
+    const __m256i v_alpha = _mm256_set1_epi32(0xFF000000);
+
+    int x = minX;
+    int idx = rowStart + minX;
+
+    // ============================================================
+    // Main loop: 8 pixels per iteration
+    // ============================================================
+    for (; x + 7 <= maxX; x += 8, idx += 8) {
+        // Inside-triangle mask: w0 >= 0 && w1 >= 0 && w2 >= 0
+        __m256 m_w0 = _mm256_cmp_ps(v_w0, v_zero, _CMP_GE_OQ);
+        __m256 m_w1 = _mm256_cmp_ps(v_w1, v_zero, _CMP_GE_OQ);
+        __m256 m_w2 = _mm256_cmp_ps(v_w2, v_zero, _CMP_GE_OQ);
+        __m256 inside = _mm256_and_ps(m_w0, _mm256_and_ps(m_w1, m_w2));
+
+        if (_mm256_movemask_ps(inside) == 0) {
+            // No pixels inside this chunk — step and continue
+            v_w0 = _mm256_add_ps(v_w0, v_w0_step);
+            v_w1 = _mm256_add_ps(v_w1, v_w1_step);
+            v_w2 = _mm256_add_ps(v_w2, v_w2_step);
+            v_invZ = _mm256_add_ps(v_invZ, v_invZ_step);
+            v_uoz = _mm256_add_ps(v_uoz, v_uoz_step);
+            v_voz = _mm256_add_ps(v_voz, v_voz_step);
+            v_ioz = _mm256_add_ps(v_ioz, v_ioz_step);
+            continue;
+        }
+
+        // Depth test
+        __m256 v_depth = _mm256_loadu_ps(&r.depthBuffer[idx]);
+        __m256 depthMask = _mm256_cmp_ps(v_invZ, v_depth, _CMP_GT_OQ);
+        __m256 writeMask = _mm256_and_ps(inside, depthMask);
+        int writeBits = _mm256_movemask_ps(writeMask);
+
+        if (writeBits == 0) {
+            v_w0 = _mm256_add_ps(v_w0, v_w0_step);
+            v_w1 = _mm256_add_ps(v_w1, v_w1_step);
+            v_w2 = _mm256_add_ps(v_w2, v_w2_step);
+            v_invZ = _mm256_add_ps(v_invZ, v_invZ_step);
+            v_uoz = _mm256_add_ps(v_uoz, v_uoz_step);
+            v_voz = _mm256_add_ps(v_voz, v_voz_step);
+            v_ioz = _mm256_add_ps(v_ioz, v_ioz_step);
+            continue;
+        }
+
+        // Compute per-lane intensity = ioz * z = ioz * (1/invZ)
+        __m256 v_z = _mm256_div_ps(v_one, v_invZ);
+        __m256 v_intensity = _mm256_mul_ps(v_ioz, v_z);
+
+        if (!texture) {
+            // ====================================================
+            // FAST PATH: flat color, fully vectorized
+            // ====================================================
+            __m256 nr = _mm256_mul_ps(v_color_r, v_intensity);
+            __m256 ng = _mm256_mul_ps(v_color_g, v_intensity);
+            __m256 nb = _mm256_mul_ps(v_color_b, v_intensity);
+
+            // Truncate to int32 (matches scalar's `(int)` behavior)
+            __m256i ir = _mm256_cvttps_epi32(nr);
+            __m256i ig = _mm256_cvttps_epi32(ng);
+            __m256i ib = _mm256_cvttps_epi32(nb);
+
+            // Pack: (0xFF<<24) | (b<<16) | (g<<8) | r
+            __m256i packed = _mm256_or_si256(
+                v_alpha,
+                _mm256_or_si256(
+                    _mm256_or_si256(ir, _mm256_slli_epi32(ig, 8)),
+                    _mm256_slli_epi32(ib, 16)
+                )
+            );
+
+            // Masked stores: only write lanes where writeMask is set
+            _mm256_maskstore_epi32((int*)&framebuffer[idx],
+                _mm256_castps_si256(writeMask), packed);
+            _mm256_maskstore_ps(&r.depthBuffer[idx],
+                _mm256_castps_si256(writeMask), v_invZ);
+        }
+        else {
+            // ====================================================
+            // SLOW PATH: textured, scalar lane loop (gather is slow)
+            // ====================================================
+            float intens[8], u_arr[8], v_arr[8];
+            _mm256_storeu_ps(intens, v_intensity);
+            _mm256_storeu_ps(u_arr, _mm256_mul_ps(v_uoz, v_z));
+            _mm256_storeu_ps(v_arr, _mm256_mul_ps(v_voz, v_z));
+
+            for (int lane = 0; lane < 8; lane++) {
+                if (!(writeBits & (1 << lane))) continue;
+
+                float u = u_arr[lane], v = v_arr[lane];
+                float uc = u < 0 ? 0 : (u > 1 ? 1 : u);
+                float vc = v < 0 ? 0 : (v > 1 ? 1 : v);
+                int tx = (int)(uc * (texW - 1));
+                int ty = (int)(vc * (texH - 1));
+                framebuffer[idx + lane] = applyIntensity(texData[ty * texW + tx], intens[lane]);
+            }
+
+            _mm256_maskstore_ps(&r.depthBuffer[idx],
+                _mm256_castps_si256(writeMask), v_invZ);
+        }
+
+        // Step all per-pixel state forward by 8 pixels
+        v_w0 = _mm256_add_ps(v_w0, v_w0_step);
+        v_w1 = _mm256_add_ps(v_w1, v_w1_step);
+        v_w2 = _mm256_add_ps(v_w2, v_w2_step);
+        v_invZ = _mm256_add_ps(v_invZ, v_invZ_step);
+        v_uoz = _mm256_add_ps(v_uoz, v_uoz_step);
+        v_voz = _mm256_add_ps(v_voz, v_voz_step);
+        v_ioz = _mm256_add_ps(v_ioz, v_ioz_step);
+    }
+
+    // ============================================================
+    // Tail loop: handle remaining < 8 pixels with scalar code
+    // ============================================================
+    float w0_arr[8], w1_arr[8], w2_arr[8];
+    float invZ_arr[8], uoz_arr[8], voz_arr[8], ioz_arr[8];
+    _mm256_storeu_ps(w0_arr, v_w0);
+    _mm256_storeu_ps(w1_arr, v_w1);
+    _mm256_storeu_ps(w2_arr, v_w2);
+    _mm256_storeu_ps(invZ_arr, v_invZ);
+    _mm256_storeu_ps(uoz_arr, v_uoz);
+    _mm256_storeu_ps(voz_arr, v_voz);
+    _mm256_storeu_ps(ioz_arr, v_ioz);
+
+    int lane = 0;
+    for (; x <= maxX; x++, idx++, lane++) {
+        if (w0_arr[lane] >= 0 && w1_arr[lane] >= 0 && w2_arr[lane] >= 0) {
+            if (invZ_arr[lane] > r.depthBuffer[idx]) {
+                r.depthBuffer[idx] = invZ_arr[lane];
+                float z = 1.0f / invZ_arr[lane];
+                float intensity = ioz_arr[lane] * z;
+                uint32_t finalColor;
+                if (texture) {
+                    float u = uoz_arr[lane] * z;
+                    float v = voz_arr[lane] * z;
+                    float uc = u < 0 ? 0 : (u > 1 ? 1 : u);
+                    float vc = v < 0 ? 0 : (v > 1 ? 1 : v);
+                    int tx = (int)(uc * (texW - 1));
+                    int ty = (int)(vc * (texH - 1));
+                    finalColor = applyIntensity(texData[ty * texW + tx], intensity);
+                }
+                else {
+                    finalColor = applyIntensity(color, intensity);
+                }
+                framebuffer[idx] = finalColor;
+            }
+        }
+    }
+}
 void drawTriangle(Renderer& r, ScreenVert a, ScreenVert b, ScreenVert c, Vec2 uv0, Vec2 uv1, Vec2 uv2, const Texture* texture, uint32_t color, float i0, float i1, float i2, int clipYMin, int clipYMax) {
     const int minX = std::max(0, (int)std::floor(std::min({ a.x, b.x, c.x })));
     const int maxX = std::min(r.width - 1, (int)std::ceil(std::max({ a.x, b.x, c.x })));
@@ -80,52 +333,27 @@ void drawTriangle(Renderer& r, ScreenVert a, ScreenVert b, ScreenVert c, Vec2 uv
     }
     uint32_t* framebuffer = r.framebuffer;
     for (int y = minY; y <= maxY; y++) {
-        float w0 = w0_row, w1 = w1_row, w2 = w2_row;
-        int idx = rowStart + minX;
-        float invZ = invZ_row;
-        float uoz = uoz_row;
-        float voz = voz_row;
-        float ioz = ioz_row;
-        bool entered = false;
-        for (int x = minX; x <= maxX; x++) {
-            if (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f) {
-                entered = true;
-                if (invZ > r.depthBuffer[idx]) {
-                    r.depthBuffer[idx] = invZ;
-                    const float z = 1 / invZ;
-                    const float intensity = ioz * z;
-                    uint32_t finalColor = color;
-                    if (texture) {
-                        const float u = uoz * z;
-                        const float v = voz * z;
-                        const float uClamped = u < 0 ? 0 : (u > 1 ? 1 : u);
-                        const float vClamped = v < 0 ? 0 : (v > 1 ? 1 : v);
+        /*processRow(r, rowStart, minX, maxX,
+            w0_row, w1_row, w2_row, w0_dx, w1_dx, w2_dx,
+            invZ_row, invZ_dx,
+            uoz_row, voz_row, ioz_row,
+            uoz_dx, voz_dx, ioz_dx,
+            texture, color, texW, texH, texData, framebuffer);*/
 
-                        const int tx = (uClamped * (texW - 1));
-                        const int ty = (vClamped * (texH - 1));
+        processRow_AVX2(r, rowStart, minX, maxX,
+            w0_row, w1_row, w2_row, w0_dx, w1_dx, w2_dx,
+            invZ_row, invZ_dx,
+            uoz_row, voz_row, ioz_row,
+            uoz_dx, voz_dx, ioz_dx,
+			texture, color, texW, texH, texData, framebuffer);
 
-                        finalColor = applyIntensity(texData[ty * texW + tx], intensity);
-                    }
-                    else {
-                        finalColor = applyIntensity(color, intensity);
-                    }
-                    framebuffer[idx] = finalColor;
-                }
-            }
-            else if (entered) {
-                break;
-            }
-            w0 += w0_dx; w1 += w1_dx; w2 += w2_dx;
-            uoz += uoz_dx;
-            voz += voz_dx;
-            idx++;
-            invZ += invZ_dx;
-            ioz += ioz_dx;
-        }
-        w0_row += w0_dy; w1_row += w1_dy; w2_row += w2_dy;
-        uoz_row += uoz_dy; voz_row += voz_dy;
+        w0_row += w0_dy;
+        w1_row += w1_dy;
+        w2_row += w2_dy;
+        uoz_row += uoz_dy;
+        voz_row += voz_dy;
         invZ_row += invZ_dy;
-        rowStart += row_dy;
         ioz_row += ioz_dy;
+        rowStart += row_dy;
     }
 }

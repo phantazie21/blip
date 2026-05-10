@@ -16,7 +16,6 @@ struct Object {
 
     std::vector<Vec3>       worldVerts;
     std::vector<Vec3>       worldNormals;
-    std::vector<ScreenVert> projected;
 
     Mat4 worldMatrix() const {
 		return translation(transform.position)

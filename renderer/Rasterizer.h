@@ -1,10 +1,18 @@
 #pragma once
 #include <cstdint>
 #include "../math/Vec2.h"
+#include "../math/Vec3.h"
 
 struct ScreenVert {
     float x, y, z;
     bool visible;
+};
+
+struct ClipVert {
+    Vec3   camPos;
+    Vec3   worldPos;
+    Vec2   uv;
+    float  intensity;
 };
 
 struct Texture {

@@ -10,6 +10,101 @@ static bool isSphereVisible(Vec3 camSpaceCenter, float radius, float fov, float 
 	return true;
 }
 
+int clipTriangleNearPlane(const ClipVert in[3], ClipVert out[4], float nearZ) {
+	int outCount = 0;
+
+	for (int i = 0; i < 3; i++) {
+		const ClipVert& a = in[i];
+		const ClipVert& b = in[(i + 1) % 3];
+		bool aInside = a.camPos.z > nearZ;
+		bool bInside = b.camPos.z > nearZ;
+
+		if (aInside) {
+			out[outCount++] = a;
+		}
+		if (aInside != bInside) {
+			float t = (nearZ - a.camPos.z) / (b.camPos.z - a.camPos.z);
+			out[outCount].camPos = lerp(a.camPos, b.camPos, t);
+			out[outCount].worldPos = lerp(a.worldPos, b.worldPos, t);
+			out[outCount].uv = a.uv * (1.0f - t) + b.uv * t;
+			out[outCount].intensity = a.intensity * (1.0f - t) + b.intensity * t;
+			outCount++;
+		}
+	}
+	return outCount; // 0 if all outside, 3 or 4 if mixed/all inside
+}
+
+void Scene::processFace(Mesh* mesh, const std::unique_ptr<Object>& obj, const Face& f, Renderer& r, const Camera& cam, const Mat4& mv) {
+	ClipVert ca;
+	ClipVert cb;
+	ClipVert cc;
+	ca.camPos = mv * mesh->vertices[f.idx[0]];
+	cb.camPos = mv * mesh->vertices[f.idx[1]];
+	cc.camPos = mv * mesh->vertices[f.idx[2]];
+	ca.worldPos = obj->worldVerts[f.idx[0]];
+	cb.worldPos = obj->worldVerts[f.idx[1]];
+	cc.worldPos = obj->worldVerts[f.idx[2]];
+
+	const Vec3& v0 = obj->worldVerts[f.idx[0]];
+	const Vec3& v1 = obj->worldVerts[f.idx[1]];
+	const Vec3& v2 = obj->worldVerts[f.idx[2]];
+	Vec3 faceNormal = cross(v1 - v0, v2 - v0);
+	if (dot(faceNormal, cam.position - v0) <= 0.0f) return;
+	Vec3 fn = normalize(faceNormal);
+	float baseDiffuse = std::max(0.0f, dot(fn, lightDir));
+	float baseIntensity = ambientLight + (1.0f - ambientLight) * baseDiffuse;
+
+	float i0 = baseIntensity, i1 = baseIntensity, i2 = baseIntensity;
+	if (!mesh->vertexNormals.empty() && f.normal[0] >= 0) {
+		auto gouraud = [&](int ni) {
+			return ambientLight + (1.0f - ambientLight) *
+				std::max(0.0f, dot(obj->worldNormals[ni], lightDir));
+			};
+		i0 = gouraud(f.normal[0]);
+		i1 = gouraud(f.normal[1]);
+		i2 = gouraud(f.normal[2]);
+	}
+	ca.intensity = i0;
+	cb.intensity = i1;
+	cc.intensity = i2;
+
+	Vec2 uv0 = {}, uv1 = {}, uv2 = {};
+	if (!mesh->vertexUVs.empty() && f.uv[0] >= 0) {
+		uv0 = mesh->vertexUVs[f.uv[0]];
+		uv1 = mesh->vertexUVs[f.uv[1]];
+		uv2 = mesh->vertexUVs[f.uv[2]];
+	}
+	ca.uv = uv0;
+	cb.uv = uv1;
+	cc.uv = uv2;
+	ClipVert in[3] = { ca, cb, cc };
+	ClipVert clipped[4];
+	int clippedCount = clipTriangleNearPlane(in, clipped, cam.nearZ * 1.5f);
+	if (clippedCount < 3) return;
+
+	ScreenVert proj[4];
+	for (int i = 0; i < clippedCount; i++) {
+		cam.project(clipped[i].camPos, r.width, r.height, proj[i]);
+		proj[i].visible = true;
+	}
+
+	if (std::abs(proj[0].x - proj[1].x) + std::abs(proj[0].y - proj[1].y) < 1.0f &&
+		std::abs(proj[1].x - proj[2].x) + std::abs(proj[1].y - proj[2].y) < 1.0f &&
+		std::abs(proj[2].x - proj[0].x) + std::abs(proj[2].y - proj[0].y) < 1.0f) return;
+
+	auto submit = [&](int a, int b, int c) {
+		r.submitDrawCall({
+			proj[a], proj[b], proj[c],
+			clipped[a].uv, clipped[b].uv, clipped[c].uv,
+			f.texture, f.color,
+			clipped[a].intensity, clipped[b].intensity, clipped[c].intensity
+			});
+		};
+
+	submit(0, 1, 2);
+	if (clippedCount == 4) submit(0, 2, 3);
+}
+
 void Scene::render(Renderer& r, const Camera& cam) {
 	const Mat4 view = cam.viewMatrix();
 	const float aspect = (float)r.width / r.height;
@@ -29,62 +124,15 @@ void Scene::render(Renderer& r, const Camera& cam) {
 		}
 		obj->worldVerts.resize(mesh->vertices.size());
 		obj->worldNormals.resize(mesh->vertexNormals.size());
-		obj->projected.resize(mesh->vertices.size());
-		bool anyVisible = false;
 
 		for (size_t i = 0; i < mesh->vertices.size(); i++) {
 			obj->worldVerts[i] = world * mesh->vertices[i];
-			Vec3 camVert = mv * mesh->vertices[i];
-			obj->projected[i].visible = cam.project(camVert, r.width, r.height, obj->projected[i]);
-			if (obj->projected[i].visible) anyVisible = true;
 		}
-		if (!anyVisible) continue;
 		for (size_t i = 0; i < mesh->vertexNormals.size(); i++) {
 			obj->worldNormals[i] = normalize(transformDirection(mesh->vertexNormals[i], world));
 		}
-
 		for (const Face& f : mesh->faces) {
-			const ScreenVert& sa = obj->projected[f.idx[0]];
-			const ScreenVert& sb = obj->projected[f.idx[1]];
-			const ScreenVert& sc = obj->projected[f.idx[2]];
-			if (!sa.visible || !sb.visible || !sc.visible) continue;
-			if (std::abs(sa.x - sb.x) + std::abs(sa.y - sb.y) < 1.0f &&
-				std::abs(sb.x - sc.x) + std::abs(sb.y - sc.y) < 1.0f &&
-				std::abs(sc.x - sa.x) + std::abs(sc.y - sa.y) < 1.0f) continue;
-
-			const Vec3& v0 = obj->worldVerts[f.idx[0]];
-			const Vec3& v1 = obj->worldVerts[f.idx[1]];
-			const Vec3& v2 = obj->worldVerts[f.idx[2]];
-			Vec3 faceNormal = cross(v1 - v0, v2 - v0);
-			if (dot(faceNormal, cam.position - v0) <= 0.0f) continue;
-			Vec3 fn = normalize(faceNormal);
-			float baseDiffuse = std::max(0.0f, dot(fn, lightDir));
-			float baseIntensity = ambientLight + (1.0f - ambientLight) * baseDiffuse;
-
-			float i0 = baseIntensity, i1 = baseIntensity, i2 = baseIntensity;
-			if (!mesh->vertexNormals.empty() && f.normal[0] >= 0) {
-				auto gouraud = [&](int ni) {
-					return ambientLight + (1.0f - ambientLight) *
-						std::max(0.0f, dot(obj->worldNormals[ni], lightDir));
-					};
-				i0 = gouraud(f.normal[0]);
-				i1 = gouraud(f.normal[1]);
-				i2 = gouraud(f.normal[2]);
-			}
-
-			Vec2 uv0 = {}, uv1 = {}, uv2 = {};
-			if (!mesh->vertexUVs.empty() && f.uv[0] >= 0) {
-				uv0 = mesh->vertexUVs[f.uv[0]];
-				uv1 = mesh->vertexUVs[f.uv[1]];
-				uv2 = mesh->vertexUVs[f.uv[2]];
-			}
-			r.submitDrawCall({
-				sa, sb, sc,
-				uv0, uv1, uv2,
-				f.texture,
-				f.color,
-				i0, i1, i2
-			});
+			processFace(mesh, obj, f, r, cam, mv);
 		}
 	}
 	r.flush();

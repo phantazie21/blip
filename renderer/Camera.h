@@ -10,6 +10,7 @@ struct Camera {
 	float pitch;
 	float fov;
 	float focal;
+	float nearZ = 0.01f;
 	Mat4 viewMatrix() const;
 	bool project(Vec3 v, int screenW, int screenH, ScreenVert& out) const;
 	void setFov(float f);

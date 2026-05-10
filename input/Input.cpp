@@ -2,7 +2,6 @@
 
 void Input::beginFrame() {
 	previous = current;
-	//mouseDelta = { 0, 0 };
 }
 
 void Input::setMouseLocked(bool locked, sf::RenderWindow& window, sf::Vector2i center) {

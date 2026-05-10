@@ -5,7 +5,7 @@ Mat4 Camera::viewMatrix() const {
 }
 
 bool Camera::project(Vec3 camSpaceVert, int screenW, int screenH, ScreenVert& out) const {
-	if (camSpaceVert.z <= 0.01f) return false;
+	if (camSpaceVert.z <= nearZ) return false;
 	const float invZ = 1.f / camSpaceVert.z;
 	const float aspect = (float)screenW / screenH;
 	const float pX = (camSpaceVert.x * invZ) * focal / aspect;
