@@ -69,6 +69,7 @@ void Editor::drawInspector(Scene& scene) {
             comp->drawInspector();
             ImGui::PushID((int)i);
             if (ImGui::SmallButton("Remove")) {
+                obj->components[i]->onDestroy();
                 obj->components.erase(obj->components.begin() + i);
                 ImGui::PopID();
                 break;

@@ -7,10 +7,12 @@
 #include "components/MeshRenderer.h"
 #include "CollisionSystem.h"
 #include "AudioSystem.h"
+#include <set>
 
 struct Scene {
 	CollisionSystem collisionSystem;
     std::vector<ContactInfo> contacts;
+    std::set<std::pair<Object*, Object*>> previousContacts;
     std::vector<std::unique_ptr<Object>> objects;
     AudioSystem audioSystem;
     Vec3  lightDir = normalize({ 0.5f, 1.0f, 0.0f });

@@ -9,6 +9,11 @@ Scene::Scene() {
 	g_audio = &audioSystem;
 }
 
+static std::pair<Object*, Object*> makePair(Object* a, Object* b) {
+	if (a > b) std::swap(a, b);
+	return { a, b };
+}
+
 void Scene::save(const std::string& path) const {
 	json j;
 	j["objects"] = json::array();
@@ -219,11 +224,35 @@ void Scene::fixedUpdate(float dt) {
 			}
 		}
 	}
+	std::set<std::pair<Object*, Object*>> currentContacts;
+
+	for (const auto& c : contacts) {
+		auto key = makePair(c.a, c.b);
+		currentContacts.insert(key);
+
+		if (previousContacts.find(key) == previousContacts.end()) {
+			for (auto& comp : c.a->components) comp->onCollisionEnter(c.b, c.normal, c.penetration);
+			for (auto& comp : c.b->components) comp->onCollisionEnter(c.a, -c.normal, c.penetration);
+		}
+	}
+
+	for (const auto& [a, b] : previousContacts) {
+		if (currentContacts.find({ a, b }) == currentContacts.end()) {
+			for (auto& comp : a->components) comp->onCollisionExit(b);
+			for (auto& comp : b->components) comp->onCollisionExit(a);
+		}
+	}
+
+	previousContacts = std::move(currentContacts);
 }
 
 void Scene::update(float dt) {
 	for (const auto& obj : objects) {
 		for (const auto& comp : obj->components) {
+			if (!comp->hasStarted) {
+				comp->onStart();
+				comp->hasStarted = true;
+			}
 			comp->update(dt);
 		}
 	}

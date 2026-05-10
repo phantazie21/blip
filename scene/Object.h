@@ -74,4 +74,8 @@ struct Object {
             components.push_back(std::move(comp));
         }
     }
+
+    ~Object() {
+        for (auto& c : components) c->onDestroy();
+	}
 };
