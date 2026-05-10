@@ -39,8 +39,9 @@ struct DrawCall {
     const Texture* texture;
     uint32_t color;
     float i0, i1, i2;
+    uint32_t submitId;
 };
 
 struct Renderer;
 
-void drawTriangle(Renderer& r, ScreenVert a, ScreenVert b, ScreenVert c, Vec2 uv0, Vec2 uv1, Vec2 uv2, const Texture* texture, uint32_t color, float i0, float i1, float i2, int clipYMin, int clipYMax);
+void drawTriangle(Renderer& r, ScreenVert a, ScreenVert b, ScreenVert c, Vec2 uv0, Vec2 uv1, Vec2 uv2, const Texture* texture, uint32_t color, float i0, float i1, float i2, int clipYMin, int clipYMax, uint32_t submitId);

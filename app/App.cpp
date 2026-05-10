@@ -1,6 +1,8 @@
 #include "App.h"
 #include "../scene/Primitives.h"
 #include <iostream>
+#include "imgui.h"
+#include "imgui-SFML.h"
 
 App::App()
     : window(sf::VideoMode::getFullscreenModes().at(0), "Software Renderer", sf::State::Fullscreen),
@@ -12,8 +14,12 @@ App::App()
 
     fpsText.setFillColor(sf::Color::Yellow);
     fpsText.setPosition({ 10.f, 10.f });
-    scene.objects.push_back(createObjectWithMesh(createBox(0.5f, 0xFFFFFFFF)));
+    auto floor = createObjectWithMesh(createBox(0.5f, 0xFF888888), { 0, -2, 5 }, false);
+    floor->getComponent<BoxCollider>()->halfExtents = { 10, 0.5f, 10 };
+    scene.objects.push_back(std::move(floor));
+    scene.objects.push_back(createObjectWithMesh(createBox(0.5f, 0xFFFFFFFF), {0.f, 3.f, 5.f}, true));
 	input.setMouseLocked(true, window, sf::Vector2i(window.getSize().x / 2, window.getSize().y / 2 ));
+	ImGui::SFML::Init(window);
 }
 
 void App::applyMouseLook() {
@@ -41,7 +47,8 @@ void App::run() {
 
     while (window.isOpen() && !input.shouldClose()) {
         input.beginFrame();
-        float dt = clock.restart().asSeconds();
+		sf::Time restart = clock.restart();
+        float dt = restart.asSeconds();
 		if (dt > 0.25f) dt = 0.25f;
         acc += dt;
         fpsTimer += dt;
@@ -52,12 +59,13 @@ void App::run() {
             frameCount = 0;
             fpsTimer = 0.0f;
         }
-        while (const std::optional event = window.pollEvent())
-			input.onEvent(event, window);
+        while (const std::optional event = window.pollEvent()) {
+            input.onEvent(event, window);
+			ImGui::SFML::ProcessEvent(window, *event);
+        }
 
-		if (input.isKeyDown(sf::Keyboard::Scancode::Escape)) {
-            window.close();
-            break;
+		if (input.isKeyPressed(sf::Keyboard::Scancode::Escape)) {
+			input.setMouseLocked(!input.isMouseLocked(), window, windowCenter);
         }
 
         while (acc >= fixedDT) {
@@ -68,6 +76,15 @@ void App::run() {
 			fixedUpdate(fixedDT);
             acc -= fixedDT;
         }
+
+        ImGui::SFML::Update(window, restart);
+
+        ImGui::ShowDemoWindow();
+
+        ImGui::Begin("Hello, world!");
+        ImGui::Button("Look at this pretty button");
+        ImGui::End();
+
 		float alpha = acc / fixedDT;
 
 		Camera renderCamera = camera;
@@ -77,9 +94,11 @@ void App::run() {
 
         render(renderCamera);
     }
+    ImGui::SFML::Shutdown();
 }
 
 void App::fixedUpdate(float dt) {
+    scene.fixedUpdate(dt);
 	const float step = 0.05f;
 	Vec3 forward = { std::sinf(-camera.yaw), 0, std::cosf(-camera.yaw) };
 	Vec3 right = { forward.z, 0, -forward.x };
@@ -101,5 +120,6 @@ void App::render(Camera currentCamera) {
 	scene.render(renderer, currentCamera);
 	renderer.present(window);
 	window.draw(fpsText);
+	ImGui::SFML::Render(window);
 	window.display();
 }

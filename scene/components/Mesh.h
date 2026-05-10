@@ -1,8 +1,8 @@
 #pragma once
 #include <vector>
-#include "../math/Vec2.h"
-#include "../math/Vec3.h"
-#include "../renderer/Rasterizer.h"
+#include "../../math/Vec2.h"
+#include "../../math/Vec3.h"
+#include "../../renderer/Rasterizer.h"
 
 struct Face {
     int idx[3];

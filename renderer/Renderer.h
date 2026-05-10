@@ -12,6 +12,8 @@ public:
     int width, height;
     uint32_t* framebuffer;
     float* depthBuffer;
+	uint32_t* idBuffer;
+	uint32_t nextSubmitId = 0;
 
     std::vector<DrawCall> drawCalls;
 

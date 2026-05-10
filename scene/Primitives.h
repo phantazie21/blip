@@ -1,5 +1,6 @@
 #pragma once
-#include "../scene/Mesh.h"
+#include "components/Mesh.h"
+#include "components/Rigidbody.h"
 #include <cmath>
 
 inline std::unique_ptr<Mesh> createBox(float halfSize, uint32_t color) {
@@ -49,9 +50,21 @@ inline std::unique_ptr<Mesh> createBox(float halfSize, uint32_t color) {
     return mesh;
 }
 
-inline std::unique_ptr<Object> createObjectWithMesh(std::unique_ptr<Mesh> mesh) {
+inline std::unique_ptr<Object> createObjectWithMesh(std::unique_ptr<Mesh> mesh, Vec3 position, bool dynamic = false) {
     auto obj = std::make_unique<Object>();
-    obj->mesh = std::move(mesh);
-	obj->transform.position = { 0, 0, 2 };
+	auto* mr = obj->addComponent<MeshRenderer>();
+    mr->mesh = std::move(mesh);
+    auto* bc = obj->addComponent<BoxCollider>();
+    Vec3 minV = mr->mesh->vertices[0], maxV = mr->mesh->vertices[0];
+    for (const auto& v : mr->mesh->vertices) {
+        minV.x = std::min(minV.x, v.x); minV.y = std::min(minV.y, v.y); minV.z = std::min(minV.z, v.z);
+        maxV.x = std::max(maxV.x, v.x); maxV.y = std::max(maxV.y, v.y); maxV.z = std::max(maxV.z, v.z);
+    }
+    bc->halfExtents = (maxV - minV) * 0.5f;	obj->transform.position = position;
+
+    if (dynamic) {
+        auto* rb = obj->addComponent<Rigidbody>();
+        rb->isStatic = false;
+	}
     return obj;
 }

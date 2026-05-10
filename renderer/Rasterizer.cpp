@@ -12,7 +12,7 @@ static inline void processRow(
     float uoz_dx, float voz_dx, float ioz_dx,
     const Texture* texture, uint32_t color,
     int texW, int texH, uint32_t* texData,
-    uint32_t* framebuffer)
+    uint32_t* framebuffer, uint32_t submitId)
 {
     float w0 = w0_row, w1 = w1_row, w2 = w2_row;
     int   idx = rowStart + minX;
@@ -25,8 +25,14 @@ static inline void processRow(
     for (int x = minX; x <= maxX; x++) {
         if (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f) {
             entered = true;
-            if (invZ > r.depthBuffer[idx]) {
+			const float epsilon = std::abs(invZ) * 1e-3f;
+			float dbValue = r.depthBuffer[idx];
+            float diff = invZ - dbValue;
+            bool depthGreater = diff > epsilon;
+            bool depthEqual = std::abs(diff) <= epsilon;
+            if (depthGreater || (depthEqual && submitId > r.idBuffer[idx])) {
                 r.depthBuffer[idx] = invZ;
+				r.idBuffer[idx] = submitId;
                 const float z = 1.0f / invZ;
                 const float intensity = ioz * z;
                 uint32_t finalColor;
@@ -66,7 +72,7 @@ static inline void processRow_AVX2(
     float uoz_dx, float voz_dx, float ioz_dx,
     const Texture* texture, uint32_t color,
     int texW, int texH, uint32_t* texData,
-    uint32_t* framebuffer)
+    uint32_t* framebuffer, uint32_t submitId)
 {
     // Lane offsets for initialization: each of the 8 lanes starts at column x+lane
     const __m256 laneOffset = _mm256_set_ps(7, 6, 5, 4, 3, 2, 1, 0);
@@ -108,6 +114,8 @@ static inline void processRow_AVX2(
     const __m256 v_color_b = _mm256_set1_ps((float)((color >> 16) & 0xff));
     const __m256i v_alpha = _mm256_set1_epi32(0xFF000000);
 
+    __m256i v_submitId = _mm256_set1_epi32((int)submitId);
+
     int x = minX;
     int idx = rowStart + minX;
 
@@ -135,7 +143,23 @@ static inline void processRow_AVX2(
 
         // Depth test
         __m256 v_depth = _mm256_loadu_ps(&r.depthBuffer[idx]);
-        __m256 depthMask = _mm256_cmp_ps(v_invZ, v_depth, _CMP_GT_OQ);
+        __m256i v_id = _mm256_loadu_si256((__m256i*) & r.idBuffer[idx]);
+
+        __m256 v_eps = _mm256_mul_ps(
+            _mm256_andnot_ps(_mm256_set1_ps(-0.0f), v_invZ),  // |invZ|
+            _mm256_set1_ps(1e-3f)
+        );
+
+        __m256 v_diff = _mm256_sub_ps(v_invZ, v_depth);
+        __m256 v_absDiff = _mm256_andnot_ps(_mm256_set1_ps(-0.0f), v_diff); // abs
+
+        __m256 depthGreater = _mm256_cmp_ps(v_diff, v_eps, _CMP_GT_OQ);
+        __m256 depthEqual = _mm256_cmp_ps(v_absDiff, v_eps, _CMP_LE_OQ);
+        __m256i idGreater_i = _mm256_cmpgt_epi32(v_submitId, v_id);
+        __m256 idGreater = _mm256_castsi256_ps(idGreater_i);
+
+        // pass: invZ > depth, OR (invZ == depth AND submitId > existingId)
+        __m256 depthMask = _mm256_or_ps(depthGreater, _mm256_and_ps(depthEqual, idGreater));
         __m256 writeMask = _mm256_and_ps(inside, depthMask);
         int writeBits = _mm256_movemask_ps(writeMask);
 
@@ -181,6 +205,8 @@ static inline void processRow_AVX2(
                 _mm256_castps_si256(writeMask), packed);
             _mm256_maskstore_ps(&r.depthBuffer[idx],
                 _mm256_castps_si256(writeMask), v_invZ);
+            _mm256_maskstore_epi32((int*)&r.idBuffer[idx],
+                _mm256_castps_si256(writeMask), v_submitId);
         }
         else {
             // ====================================================
@@ -204,6 +230,8 @@ static inline void processRow_AVX2(
 
             _mm256_maskstore_ps(&r.depthBuffer[idx],
                 _mm256_castps_si256(writeMask), v_invZ);
+            _mm256_maskstore_epi32((int*)&r.idBuffer[idx],
+                _mm256_castps_si256(writeMask), v_submitId);
         }
 
         // Step all per-pixel state forward by 8 pixels
@@ -232,8 +260,12 @@ static inline void processRow_AVX2(
     int lane = 0;
     for (; x <= maxX; x++, idx++, lane++) {
         if (w0_arr[lane] >= 0 && w1_arr[lane] >= 0 && w2_arr[lane] >= 0) {
-            if (invZ_arr[lane] > r.depthBuffer[idx]) {
+			float diff = invZ_arr[lane] - r.depthBuffer[idx];
+			float eps = std::abs(invZ_arr[lane]) * 1e-3f;
+			bool pass = diff > eps || (std::abs(diff) <= eps && submitId > r.idBuffer[idx]);
+            if (pass) {
                 r.depthBuffer[idx] = invZ_arr[lane];
+				r.idBuffer[idx] = submitId;
                 float z = 1.0f / invZ_arr[lane];
                 float intensity = ioz_arr[lane] * z;
                 uint32_t finalColor;
@@ -254,7 +286,7 @@ static inline void processRow_AVX2(
         }
     }
 }
-void drawTriangle(Renderer& r, ScreenVert a, ScreenVert b, ScreenVert c, Vec2 uv0, Vec2 uv1, Vec2 uv2, const Texture* texture, uint32_t color, float i0, float i1, float i2, int clipYMin, int clipYMax) {
+void drawTriangle(Renderer& r, ScreenVert a, ScreenVert b, ScreenVert c, Vec2 uv0, Vec2 uv1, Vec2 uv2, const Texture* texture, uint32_t color, float i0, float i1, float i2, int clipYMin, int clipYMax, uint32_t submitId) {
     const int minX = std::max(0, (int)std::floor(std::min({ a.x, b.x, c.x })));
     const int maxX = std::min(r.width - 1, (int)std::ceil(std::max({ a.x, b.x, c.x })));
     const int minY = std::max(clipYMin, (int)std::floor(std::min({ a.y, b.y, c.y })));
@@ -324,7 +356,7 @@ void drawTriangle(Renderer& r, ScreenVert a, ScreenVert b, ScreenVert c, Vec2 uv
     int rowStart = minY * r.width;
     const int row_dy = r.width;
 
-    int texW, texH;
+    int texW = 0, texH = 0;
     uint32_t* texData = nullptr;
     if (texture) {
         texW = texture->width;
@@ -338,14 +370,14 @@ void drawTriangle(Renderer& r, ScreenVert a, ScreenVert b, ScreenVert c, Vec2 uv
             invZ_row, invZ_dx,
             uoz_row, voz_row, ioz_row,
             uoz_dx, voz_dx, ioz_dx,
-            texture, color, texW, texH, texData, framebuffer);*/
+            texture, color, texW, texH, texData, framebuffer, submitId);*/
 
         processRow_AVX2(r, rowStart, minX, maxX,
             w0_row, w1_row, w2_row, w0_dx, w1_dx, w2_dx,
             invZ_row, invZ_dx,
             uoz_row, voz_row, ioz_row,
             uoz_dx, voz_dx, ioz_dx,
-			texture, color, texW, texH, texData, framebuffer);
+			texture, color, texW, texH, texData, framebuffer, submitId);
 
         w0_row += w0_dy;
         w1_row += w1_dy;

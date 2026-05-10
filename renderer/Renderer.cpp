@@ -7,6 +7,7 @@ Renderer::Renderer(int width, int height) : width(width), height(height), textur
 	}
 	framebuffer = new uint32_t[width * height];
 	depthBuffer = new float[width * height];
+	idBuffer = new uint32_t[width * height];
 	assert(texture.getNativeHandle() != 0);
 }
 
@@ -21,6 +22,8 @@ Renderer::~Renderer() {
 void Renderer::clear(uint32_t color) {
 	std::fill(framebuffer, framebuffer + width * height, color);
 	std::fill(depthBuffer, depthBuffer + width * height, 0.0f);
+	std::fill(idBuffer, idBuffer + width * height, 0);
+	nextSubmitId = 0;
 }
 
 void Renderer::present(sf::RenderWindow& window) {
@@ -42,7 +45,7 @@ void Renderer::workerLoop(int t) {
 				dc.uv0, dc.uv1, dc.uv2,
 				dc.texture, dc.color,
 				dc.i0, dc.i1, dc.i2,
-				yMin, yMax);
+				yMin, yMax, dc.submitId);
 		}
 
 		syncEnd.arrive_and_wait();
@@ -50,6 +53,8 @@ void Renderer::workerLoop(int t) {
 }
 
 void Renderer::submitDrawCall(const DrawCall& dc) {
+	DrawCall dcCopy = dc;
+	dcCopy.submitId = nextSubmitId++;
 	drawCalls.push_back(dc);
 }
 

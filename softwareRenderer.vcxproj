@@ -71,6 +71,9 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <IncludePath>C:\Users\User\source\repos\blip\third_party;$(IncludePath)</IncludePath>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -139,8 +142,14 @@
     <ClCompile Include="renderer\Camera.cpp" />
     <ClCompile Include="renderer\Rasterizer.cpp" />
     <ClCompile Include="renderer\Renderer.cpp" />
-    <ClCompile Include="scene\Mesh.cpp" />
+    <ClCompile Include="scene\CollisionSystem.cpp" />
+    <ClCompile Include="scene\components\Mesh.cpp" />
     <ClCompile Include="scene\Scene.cpp" />
+    <ClCompile Include="third_party\imgui-SFML.cpp" />
+    <ClCompile Include="third_party\imgui.cpp" />
+    <ClCompile Include="third_party\imgui_draw.cpp" />
+    <ClCompile Include="third_party\imgui_tables.cpp" />
+    <ClCompile Include="third_party\imgui_widgets.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="app\App.h" />
@@ -153,10 +162,18 @@
     <ClInclude Include="renderer\Camera.h" />
     <ClInclude Include="renderer\Rasterizer.h" />
     <ClInclude Include="renderer\Renderer.h" />
-    <ClInclude Include="scene\Mesh.h" />
+    <ClInclude Include="scene\CollisionSystem.h" />
+    <ClInclude Include="scene\components\Collider.h" />
+    <ClInclude Include="scene\components\Component.h" />
+    <ClInclude Include="scene\components\Mesh.h" />
+    <ClInclude Include="scene\components\MeshRenderer.h" />
+    <ClInclude Include="scene\components\Rigidbody.h" />
     <ClInclude Include="scene\Object.h" />
     <ClInclude Include="scene\Primitives.h" />
     <ClInclude Include="scene\Scene.h" />
+    <ClInclude Include="third_party\imconfig.h" />
+    <ClInclude Include="third_party\imgui-SFML.h" />
+    <ClInclude Include="third_party\imgui-SFML_export.h" />
     <ClInclude Include="third_party\stb_image.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

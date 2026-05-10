@@ -1,5 +1,6 @@
 #include "Scene.h"
 #include "../renderer/Renderer.h"
+#include <iostream>
 
 static bool isSphereVisible(Vec3 camSpaceCenter, float radius, float fov, float aspect) {
 	if (camSpaceCenter.z + radius <= 0.01f) return false;
@@ -34,20 +35,20 @@ int clipTriangleNearPlane(const ClipVert in[3], ClipVert out[4], float nearZ) {
 	return outCount; // 0 if all outside, 3 or 4 if mixed/all inside
 }
 
-void Scene::processFace(Mesh* mesh, const std::unique_ptr<Object>& obj, const Face& f, Renderer& r, const Camera& cam, const Mat4& mv) {
+void Scene::processFace(Mesh* mesh, const MeshRenderer* mr, const Face& f, Renderer& r, const Camera& cam, const Mat4& mv) {
 	ClipVert ca;
 	ClipVert cb;
 	ClipVert cc;
 	ca.camPos = mv * mesh->vertices[f.idx[0]];
 	cb.camPos = mv * mesh->vertices[f.idx[1]];
 	cc.camPos = mv * mesh->vertices[f.idx[2]];
-	ca.worldPos = obj->worldVerts[f.idx[0]];
-	cb.worldPos = obj->worldVerts[f.idx[1]];
-	cc.worldPos = obj->worldVerts[f.idx[2]];
+	ca.worldPos = mr->worldVerts[f.idx[0]];
+	cb.worldPos = mr->worldVerts[f.idx[1]];
+	cc.worldPos = mr->worldVerts[f.idx[2]];
 
-	const Vec3& v0 = obj->worldVerts[f.idx[0]];
-	const Vec3& v1 = obj->worldVerts[f.idx[1]];
-	const Vec3& v2 = obj->worldVerts[f.idx[2]];
+	const Vec3& v0 = mr->worldVerts[f.idx[0]];
+	const Vec3& v1 = mr->worldVerts[f.idx[1]];
+	const Vec3& v2 = mr->worldVerts[f.idx[2]];
 	Vec3 faceNormal = cross(v1 - v0, v2 - v0);
 	if (dot(faceNormal, cam.position - v0) <= 0.0f) return;
 	Vec3 fn = normalize(faceNormal);
@@ -58,7 +59,7 @@ void Scene::processFace(Mesh* mesh, const std::unique_ptr<Object>& obj, const Fa
 	if (!mesh->vertexNormals.empty() && f.normal[0] >= 0) {
 		auto gouraud = [&](int ni) {
 			return ambientLight + (1.0f - ambientLight) *
-				std::max(0.0f, dot(obj->worldNormals[ni], lightDir));
+				std::max(0.0f, dot(mr->worldNormals[ni], lightDir));
 			};
 		i0 = gouraud(f.normal[0]);
 		i1 = gouraud(f.normal[1]);
@@ -109,31 +110,73 @@ void Scene::render(Renderer& r, const Camera& cam) {
 	const Mat4 view = cam.viewMatrix();
 	const float aspect = (float)r.width / r.height;
 	for (const auto& obj : objects) {
+		MeshRenderer* mr = obj->getComponent<MeshRenderer>();
+		if (!mr || !mr->mesh) continue;
 		const Mat4 world = obj->worldMatrix();
 		Mat4 mv = view * world;
-		Vec3 camCenter = mv * obj->mesh->bounds.center;
-		if (!isSphereVisible(camCenter, obj->mesh->bounds.radius, cam.fov, aspect)) continue;
-		Mesh* mesh = obj->mesh.get();
-		if (!obj->lods.empty()) {
-			int lodCount = (int)obj->lods.size();
+		Vec3 camCenter = mv * mr->mesh->bounds.center;
+		if (!isSphereVisible(camCenter, mr->mesh->bounds.radius, cam.fov, aspect)) continue;
+		Mesh* mesh = mr->mesh.get();
+		if (!mr->lods.empty()) {
+			int lodCount = (int)mr->lods.size();
 			float pixelRadius = (mesh->bounds.radius / camCenter.z) * cam.focal * (r.height * 0.5f);
-			if (pixelRadius < 40 && lodCount > 3) mesh = &obj->lods[3];
-			else if (pixelRadius < 80 && lodCount > 2) mesh = &obj->lods[2];
-			else if (pixelRadius < 120 && lodCount > 1) mesh = &obj->lods[1];
-			else if (lodCount > 0)                      mesh = &obj->lods[0];
+			if (pixelRadius < 40 && lodCount > 3) mesh = &mr->lods[3];
+			else if (pixelRadius < 80 && lodCount > 2) mesh = &mr->lods[2];
+			else if (pixelRadius < 120 && lodCount > 1) mesh = &mr->lods[1];
+			else if (lodCount > 0)                      mesh = &mr->lods[0];
 		}
-		obj->worldVerts.resize(mesh->vertices.size());
-		obj->worldNormals.resize(mesh->vertexNormals.size());
+		mr->worldVerts.resize(mesh->vertices.size());
+		mr->worldNormals.resize(mesh->vertexNormals.size());
 
-		for (size_t i = 0; i < mesh->vertices.size(); i++) {
-			obj->worldVerts[i] = world * mesh->vertices[i];
-		}
-		for (size_t i = 0; i < mesh->vertexNormals.size(); i++) {
-			obj->worldNormals[i] = normalize(transformDirection(mesh->vertexNormals[i], world));
-		}
-		for (const Face& f : mesh->faces) {
-			processFace(mesh, obj, f, r, cam, mv);
-		}
+		for (size_t i = 0; i < mesh->vertices.size(); i++)
+			mr->worldVerts[i] = world * mesh->vertices[i];
+		for (size_t i = 0; i < mesh->vertexNormals.size(); i++)
+			mr->worldNormals[i] = normalize(transformDirection(mesh->vertexNormals[i], world));
+
+		for (const Face& f : mesh->faces)
+			processFace(mesh, mr, f, r, cam, mv);
 	}
 	r.flush();
+}
+
+void Scene::fixedUpdate(float dt) {
+	const Vec3 gravity = { 0.f, -9.81f, 0.f };
+	const int substeps = 4;
+	const float subDT = dt / substeps;
+	for (int i = 0; i < substeps; i++) {
+		for (const auto& obj : objects) {
+			Rigidbody* rb = obj->getComponent<Rigidbody>();
+			if (!rb || rb->isStatic) continue;
+			if (rb->useGravity) rb->velocity = rb->velocity + gravity * subDT;
+			obj->transform.position = obj->transform.position + rb->velocity * subDT;
+		}
+		collisionSystem.detectCollisions(objects, contacts);
+		for (const auto& c : contacts) {
+			Rigidbody* rbA = c.a->getComponent<Rigidbody>();
+			Rigidbody* rbB = c.b->getComponent<Rigidbody>();
+			bool aDyn = rbA && !rbA->isStatic;
+			bool bDyn = rbB && !rbB->isStatic;
+
+			Vec3 push = c.normal * c.penetration;
+			if (aDyn && bDyn) {
+				c.a->transform.position = c.a->transform.position + push * 0.5f;
+				c.b->transform.position = c.b->transform.position - push * 0.5f;
+			}
+			else if (aDyn) {
+				c.a->transform.position = c.a->transform.position + push;
+			}
+			else if (bDyn) {
+				c.b->transform.position = c.b->transform.position - push;
+			}
+
+			if (aDyn) {
+				float vAlongN = dot(rbA->velocity, c.normal);
+				if (vAlongN < 0) rbA->velocity = rbA->velocity - c.normal * vAlongN;
+			}
+			if (bDyn) {
+				float vAlongN = dot(rbB->velocity, c.normal);
+				if (vAlongN > 0) rbB->velocity = rbB->velocity - c.normal * vAlongN;
+			}
+		}
+	}
 }
