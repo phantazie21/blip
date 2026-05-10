@@ -140,12 +140,12 @@
     <ClCompile Include="io\OBJLoader.cpp" />
     <ClCompile Include="io\Textureloader.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="renderer\Camera.cpp" />
     <ClCompile Include="renderer\Rasterizer.cpp" />
     <ClCompile Include="renderer\Renderer.cpp" />
     <ClCompile Include="scene\AudioSystem.cpp" />
     <ClCompile Include="scene\CollisionSystem.cpp" />
     <ClCompile Include="scene\components\AudioSource.cpp" />
+    <ClCompile Include="scene\components\Camera.cpp" />
     <ClCompile Include="scene\components\ComponentFactory.cpp" />
     <ClCompile Include="scene\components\Mesh.cpp" />
     <ClCompile Include="scene\Primitives.cpp" />
@@ -165,12 +165,12 @@
     <ClInclude Include="math\Mat4.h" />
     <ClInclude Include="math\Vec2.h" />
     <ClInclude Include="math\Vec3.h" />
-    <ClInclude Include="renderer\Camera.h" />
     <ClInclude Include="renderer\Rasterizer.h" />
     <ClInclude Include="renderer\Renderer.h" />
     <ClInclude Include="scene\AudioSystem.h" />
     <ClInclude Include="scene\CollisionSystem.h" />
     <ClInclude Include="scene\components\AudioSource.h" />
+    <ClInclude Include="scene\components\Camera.h" />
     <ClInclude Include="scene\components\Collider.h" />
     <ClInclude Include="scene\components\Component.h" />
     <ClInclude Include="scene\components\Mesh.h" />
@@ -179,6 +179,7 @@
     <ClInclude Include="scene\Object.h" />
     <ClInclude Include="scene\Primitives.h" />
     <ClInclude Include="scene\Scene.h" />
+    <ClInclude Include="scene\Transform.h" />
     <ClInclude Include="third_party\imconfig.h" />
     <ClInclude Include="third_party\imgui-SFML.h" />
     <ClInclude Include="third_party\imgui-SFML_export.h" />

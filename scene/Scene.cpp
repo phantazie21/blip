@@ -14,6 +14,14 @@ static std::pair<Object*, Object*> makePair(Object* a, Object* b) {
 	return { a, b };
 }
 
+Object* Scene::findMainCameraObject() const {
+	for (const auto& obj : objects) {
+		Camera* cam = obj->getComponent<Camera>();
+		if (cam && cam->isMain) return obj.get();
+	}
+	return nullptr;
+}
+
 void Scene::save(const std::string& path) const {
 	json j;
 	j["objects"] = json::array();
@@ -40,11 +48,20 @@ void Scene::load(const std::string& path) {
 			if (mr->meshType == "box") {
 				mr->mesh = createBox(mr->meshParam, mr->color);
 			}
-			// add sphere/obj cases as you support them
+			// TODO: add sphere/obj cases
 		}
 
 		objects.push_back(std::move(obj));
 	}
+	auto cam = findMainCameraObject();
+	if (!cam) {
+		auto camObj = std::make_unique<Object>();
+		camObj->transform.position = { 0, 0, 0 };
+		auto* camComp = camObj->addComponent<Camera>();
+		camComp->setFov(80.0f * 3.14159265f / 180.0f);
+		objects.push_back(std::move(camObj));
+	}
+
 }
 
 static bool isSphereVisible(Vec3 camSpaceCenter, float radius, float fov, float aspect) {
@@ -95,7 +112,7 @@ void Scene::processFace(Mesh* mesh, const MeshRenderer* mr, const Face& f, Rende
 	const Vec3& v1 = mr->worldVerts[f.idx[1]];
 	const Vec3& v2 = mr->worldVerts[f.idx[2]];
 	Vec3 faceNormal = cross(v1 - v0, v2 - v0);
-	if (dot(faceNormal, cam.position - v0) <= 0.0f) return;
+	if (dot(faceNormal, cam.owner->transform.position - v0) <= 0.0f) return;
 	Vec3 fn = normalize(faceNormal);
 	float baseDiffuse = std::max(0.0f, dot(fn, lightDir));
 	float baseIntensity = ambientLight + (1.0f - ambientLight) * baseDiffuse;
@@ -151,8 +168,15 @@ void Scene::processFace(Mesh* mesh, const MeshRenderer* mr, const Face& f, Rende
 	if (clippedCount == 4) submit(0, 2, 3);
 }
 
-void Scene::render(Renderer& r, const Camera& cam) {
-	const Mat4 view = cam.viewMatrix();
+void Scene::render(Renderer& r) {
+	Camera* cam = nullptr;
+	Object* camObj = nullptr;
+	for (const auto& obj : objects) {
+		Camera* c = obj->getComponent<Camera>();
+		if (c && c->isMain) { cam = c; camObj = obj.get(); break; }
+	}
+	if (!cam) return;
+	const Mat4 view = cam->viewMatrix(camObj->transform);
 	const float aspect = (float)r.width / r.height;
 	for (const auto& obj : objects) {
 		MeshRenderer* mr = obj->getComponent<MeshRenderer>();
@@ -160,11 +184,11 @@ void Scene::render(Renderer& r, const Camera& cam) {
 		const Mat4 world = obj->worldMatrix();
 		Mat4 mv = view * world;
 		Vec3 camCenter = mv * mr->mesh->bounds.center;
-		if (!isSphereVisible(camCenter, mr->mesh->bounds.radius, cam.fov, aspect)) continue;
+		if (!isSphereVisible(camCenter, mr->mesh->bounds.radius, cam->fov, aspect)) continue;
 		Mesh* mesh = mr->mesh.get();
 		if (!mr->lods.empty()) {
 			int lodCount = (int)mr->lods.size();
-			float pixelRadius = (mesh->bounds.radius / camCenter.z) * cam.focal * (r.height * 0.5f);
+			float pixelRadius = (mesh->bounds.radius / camCenter.z) * cam->focal * (r.height * 0.5f);
 			if (pixelRadius < 40 && lodCount > 3) mesh = &mr->lods[3];
 			else if (pixelRadius < 80 && lodCount > 2) mesh = &mr->lods[2];
 			else if (pixelRadius < 120 && lodCount > 1) mesh = &mr->lods[1];
@@ -179,7 +203,7 @@ void Scene::render(Renderer& r, const Camera& cam) {
 			mr->worldNormals[i] = normalize(transformDirection(mesh->vertexNormals[i], world));
 
 		for (const Face& f : mesh->faces)
-			processFace(mesh, mr, f, r, cam, mv);
+			processFace(mesh, mr, f, r, *cam, mv);
 	}
 	r.flush();
 }

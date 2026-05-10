@@ -10,7 +10,6 @@ App::App()
 	fpsText(font, "", 20),
     prevPosition({ 0, 0, 0 })
 {
-    camera.setFov(80.0f * 3.14159265f / 180.0f);
     font.openFromFile("C:/Windows/Fonts/arial.ttf");
 
     fpsText.setFillColor(sf::Color::Yellow);
@@ -19,16 +18,23 @@ App::App()
     floor->getComponent<BoxCollider>()->halfExtents = { 10, 0.5f, 10 };
     scene.objects.push_back(std::move(floor));
     scene.objects.push_back(createObjectWithMesh(createBox(0.5f, 0xFFFFFFFF), {0.f, 3.f, 5.f}, true));
+    auto camObj = std::make_unique<Object>();
+    camObj->transform.position = { 0, 0, 0 };
+    auto* cam = camObj->addComponent<Camera>();
+    cam->setFov(80.0f * 3.14159265f / 180.0f);
+    scene.objects.push_back(std::move(camObj));
 	input.setMouseLocked(true, window, sf::Vector2i(window.getSize().x / 2, window.getSize().y / 2 ));
 	ImGui::SFML::Init(window);
 }
 
 void App::applyMouseLook() {
+    Object* cameraObj = scene.findMainCameraObject();  // helper
+    if (!cameraObj) return;
     sf::Vector2i md = input.getMouseDelta();
     input.resetMouseDelta();
-    camera.yaw += md.x * 0.003f;
-    camera.pitch += md.y * 0.003f;
-    camera.pitch = std::clamp(camera.pitch, -1.57f, 1.57f);
+    cameraObj->transform.yaw += md.x * 0.003f;
+    cameraObj->transform.pitch += md.y * 0.003f;
+    cameraObj->transform.pitch = std::clamp(cameraObj->transform.pitch, -1.57f, 1.57f);
 }
 
 void App::setVSync(bool enabled) {
@@ -47,6 +53,14 @@ void App::run() {
     //setVSync(true);
 
     while (window.isOpen() && !input.shouldClose()) {
+        auto cameraObj = scene.findMainCameraObject();
+        if (!cameraObj) {
+			auto camObj = std::make_unique<Object>();
+			camObj->transform.position = { 0, 0, 0 };
+			auto* cam = camObj->addComponent<Camera>();
+			cam->setFov(80.0f * 3.14159265f / 180.0f);
+			scene.objects.push_back(std::move(camObj));
+        }
         input.beginFrame();
 		sf::Time restart = clock.restart();
         float dt = restart.asSeconds();
@@ -70,9 +84,9 @@ void App::run() {
         }
 
         while (acc >= fixedDT) {
-			prevPosition = camera.position;
-			prevYaw = camera.yaw;
-			prevPitch = camera.pitch;
+			prevPosition = cameraObj->transform.position;
+			prevYaw = cameraObj->transform.yaw;
+			prevPitch = cameraObj->transform.pitch;
 			applyMouseLook();
 			fixedUpdate(fixedDT);
             acc -= fixedDT;
@@ -85,20 +99,25 @@ void App::run() {
 
 		float alpha = acc / fixedDT;
 
-		Camera renderCamera = camera;
-		renderCamera.position = lerp(prevPosition, camera.position, alpha);
-		renderCamera.yaw = prevYaw + (camera.yaw - prevYaw) * alpha;
-		renderCamera.pitch = prevPitch + (camera.pitch - prevPitch) * alpha;
+        Transform realTransform = cameraObj->transform;
 
-        render(renderCamera);
+        cameraObj->transform.position = lerp(prevPosition, realTransform.position, alpha);
+        cameraObj->transform.yaw = prevYaw + (realTransform.yaw - prevYaw) * alpha;
+        cameraObj->transform.pitch = prevPitch + (realTransform.pitch - prevPitch) * alpha;
+
+        render();
+
+        cameraObj->transform = realTransform;
     }
     ImGui::SFML::Shutdown();
 }
 
 void App::fixedUpdate(float dt) {
+	auto cameraObj = scene.findMainCameraObject();
+    if (!cameraObj) return;
     scene.fixedUpdate(dt);
 	const float step = 0.05f;
-	Vec3 forward = { std::sinf(-camera.yaw), 0, std::cosf(-camera.yaw) };
+	Vec3 forward = { std::sinf(-cameraObj->transform.yaw), 0, std::cosf(-cameraObj->transform.yaw) };
 	Vec3 right = { forward.z, 0, -forward.x };
 	Vec3 move = {};
 	if (input.isKeyDown(sf::Keyboard::Scancode::W)) move = move + forward;
@@ -107,15 +126,15 @@ void App::fixedUpdate(float dt) {
 	if (input.isKeyDown(sf::Keyboard::Scancode::D)) move = move + right;
 
 	float len = length(move);
-	if (len > 0.0f) camera.position = camera.position + (move / len) * step;
+	if (len > 0.0f) cameraObj->transform.position = cameraObj->transform.position + (move / len) * step;
 
-	if (input.isKeyDown(sf::Keyboard::Scancode::E)) camera.position.y += step;
-	if (input.isKeyDown(sf::Keyboard::Scancode::Q)) camera.position.y -= step;
+	if (input.isKeyDown(sf::Keyboard::Scancode::E)) cameraObj->transform.position.y += step;
+	if (input.isKeyDown(sf::Keyboard::Scancode::Q)) cameraObj->transform.position.y -= step;
 }
 
-void App::render(Camera currentCamera) {
+void App::render() {
 	renderer.clear(0xFF7D7D7Du);
-	scene.render(renderer, currentCamera);
+    scene.render(renderer);
 	renderer.present(window);
 	window.draw(fpsText);
 	ImGui::SFML::Render(window);

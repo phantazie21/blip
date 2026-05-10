@@ -2,13 +2,9 @@
 #include "components/Component.h"
 #include "../math/Vec3.h"
 #include "../math/Mat4.h"
+#include "Transform.h"
 #include <vector>
 #include <memory>
-
-struct Transform {
-    Vec3  position = {};
-    float yaw = 0, pitch = 0, roll = 0;
-};
 
 struct Object {
     Transform           transform;

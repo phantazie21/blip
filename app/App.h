@@ -11,7 +11,6 @@ public:
 private:
     sf::RenderWindow window;
     Renderer         renderer;
-    Camera           camera;
     Scene            scene;
 	Editor           editor;
     Input            input;
@@ -24,7 +23,7 @@ private:
 
     void handleEvents();
     void fixedUpdate(float dt);
-    void render(Camera currentCamera);
+    void render();
     void applyMouseLook();
 	void setVSync(bool enabled);
 };

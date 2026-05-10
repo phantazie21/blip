@@ -3,6 +3,7 @@
 #include "Collider.h"
 #include "Rigidbody.h"
 #include "AudioSource.h"
+#include "Camera.h"
 
 std::unique_ptr<Component> createComponent(const std::string& typeName) {
     if (typeName == "MeshRenderer")    return std::make_unique<MeshRenderer>();
@@ -10,5 +11,6 @@ std::unique_ptr<Component> createComponent(const std::string& typeName) {
     if (typeName == "SphereCollider")  return std::make_unique<SphereCollider>();
     if (typeName == "Rigidbody")       return std::make_unique<Rigidbody>();
 	if (typeName == "AudioSource")     return std::make_unique<AudioSource>();
+	if (typeName == "Camera")          return std::make_unique<Camera>();
     return nullptr;
 }
