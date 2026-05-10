@@ -1,6 +1,40 @@
 #include "Scene.h"
 #include "../renderer/Renderer.h"
-#include <iostream>
+#include <fstream>
+#include "Primitives.h"
+
+void Scene::save(const std::string& path) const {
+	json j;
+	j["objects"] = json::array();
+	for (const auto& obj : objects) {
+		j["objects"].push_back(obj->toJson());
+	}
+	std::ofstream out(path);
+	out << j.dump(2);  // pretty-print with 2-space indent
+}
+
+void Scene::load(const std::string& path) {
+	std::ifstream in(path);
+	if (!in.is_open()) return;
+	json j;
+	in >> j;
+
+	objects.clear();
+	for (const auto& objJson : j["objects"]) {
+		auto obj = std::make_unique<Object>();
+		obj->fromJson(objJson);
+
+		// post-load: rebuild MeshRenderer's mesh from its descriptor
+		if (auto* mr = obj->getComponent<MeshRenderer>()) {
+			if (mr->meshType == "box") {
+				mr->mesh = createBox(mr->meshParam, mr->color);
+			}
+			// add sphere/obj cases as you support them
+		}
+
+		objects.push_back(std::move(obj));
+	}
+}
 
 static bool isSphereVisible(Vec3 camSpaceCenter, float radius, float fov, float aspect) {
 	if (camSpaceCenter.z + radius <= 0.01f) return false;

@@ -135,6 +135,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="app\App.cpp" />
+    <ClCompile Include="editor\Editor.cpp" />
     <ClCompile Include="input\Input.cpp" />
     <ClCompile Include="io\OBJLoader.cpp" />
     <ClCompile Include="io\Textureloader.cpp" />
@@ -143,7 +144,9 @@
     <ClCompile Include="renderer\Rasterizer.cpp" />
     <ClCompile Include="renderer\Renderer.cpp" />
     <ClCompile Include="scene\CollisionSystem.cpp" />
+    <ClCompile Include="scene\components\ComponentFactory.cpp" />
     <ClCompile Include="scene\components\Mesh.cpp" />
+    <ClCompile Include="scene\Primitives.cpp" />
     <ClCompile Include="scene\Scene.cpp" />
     <ClCompile Include="third_party\imgui-SFML.cpp" />
     <ClCompile Include="third_party\imgui.cpp" />
@@ -153,6 +156,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="app\App.h" />
+    <ClInclude Include="editor\Editor.h" />
     <ClInclude Include="input\Input.h" />
     <ClInclude Include="io\OBJLoader.h" />
     <ClInclude Include="io\Textureloader.h" />
@@ -174,6 +178,7 @@
     <ClInclude Include="third_party\imconfig.h" />
     <ClInclude Include="third_party\imgui-SFML.h" />
     <ClInclude Include="third_party\imgui-SFML_export.h" />
+    <ClInclude Include="third_party\json.hpp" />
     <ClInclude Include="third_party\stb_image.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

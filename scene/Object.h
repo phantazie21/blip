@@ -36,4 +36,42 @@ struct Object {
             if (auto* t = dynamic_cast<T*>(c.get())) return t;
         return nullptr;
     }
+
+    json toJson() const {
+        json j;
+        j["transform"] = {
+            {"position", {transform.position.x, transform.position.y, transform.position.z}},
+            {"yaw",   transform.yaw},
+            {"pitch", transform.pitch},
+            {"roll",  transform.roll}
+        };
+        json comps = json::array();
+        for (const auto& c : components) {
+            comps.push_back({
+                {"type", c->typeName()},
+                {"data", c->toJson()}
+                });
+        }
+        j["components"] = comps;
+        return j;
+    }
+    
+    void fromJson(const json& j) {
+        auto t = j["transform"];
+        auto p = t["position"];
+        transform.position = { p[0], p[1], p[2] };
+        transform.yaw = t.value("yaw", 0.0f);
+        transform.pitch = t.value("pitch", 0.0f);
+        transform.roll = t.value("roll", 0.0f);
+
+        components.clear();
+        for (const auto& c : j["components"]) {
+            std::string type = c["type"];
+            auto comp = createComponent(type);
+            if (!comp) continue;
+            comp->owner = this;
+            comp->fromJson(c["data"]);
+            components.push_back(std::move(comp));
+        }
+    }
 };

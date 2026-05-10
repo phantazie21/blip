@@ -17,4 +17,6 @@ struct Scene {
     void processFace(Mesh* mesh, const MeshRenderer* mr, const Face& f, Renderer& r, const Camera& cam, const Mat4& mv);
 	void update(float dt);
     void fixedUpdate(float dt);
+	void save(const std::string& path) const;
+	void load(const std::string& path);
 };

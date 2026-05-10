@@ -2,6 +2,7 @@
 #include "../input/Input.h"
 #include "../renderer/Renderer.h"
 #include "../scene/Scene.h"
+#include "../editor/Editor.h"
 
 class App {
 public:
@@ -12,6 +13,7 @@ private:
     Renderer         renderer;
     Camera           camera;
     Scene            scene;
+	Editor           editor;
     Input            input;
     sf::Font         font;
     sf::Text         fpsText;

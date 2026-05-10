@@ -1,0 +1,126 @@
+{
+  "objects": [
+    {
+      "components": [
+        {
+          "data": {
+            "color": 4278255428,
+            "param": 0.5,
+            "type": "box"
+          },
+          "type": "MeshRenderer"
+        },
+        {
+          "data": {
+            "halfExtents": [
+              10.0,
+              0.5,
+              10.0
+            ]
+          },
+          "type": "BoxCollider"
+        }
+      ],
+      "transform": {
+        "pitch": 0.0,
+        "position": [
+          0.0,
+          -2.0,
+          5.0
+        ],
+        "roll": 0.0,
+        "yaw": 0.8999999761581421
+      }
+    },
+    {
+      "components": [
+        {
+          "data": {
+            "color": 4294967295,
+            "param": 0.5,
+            "type": "box"
+          },
+          "type": "MeshRenderer"
+        },
+        {
+          "data": {
+            "halfExtents": [
+              0.5,
+              0.5,
+              0.5
+            ]
+          },
+          "type": "BoxCollider"
+        },
+        {
+          "data": {
+            "isStatic": false,
+            "mass": 1.0,
+            "useGravity": true,
+            "velocity": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "type": "Rigidbody"
+        }
+      ],
+      "transform": {
+        "pitch": 0.0,
+        "position": [
+          0.0,
+          -1.0001702308654785,
+          5.0
+        ],
+        "roll": 0.0,
+        "yaw": 0.0
+      }
+    },
+    {
+      "components": [
+        {
+          "data": {
+            "color": 4278190335,
+            "param": 0.5,
+            "type": "box"
+          },
+          "type": "MeshRenderer"
+        },
+        {
+          "data": {
+            "halfExtents": [
+              0.5,
+              0.5,
+              0.5
+            ]
+          },
+          "type": "BoxCollider"
+        },
+        {
+          "data": {
+            "isStatic": false,
+            "mass": 1.0,
+            "useGravity": true,
+            "velocity": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "type": "Rigidbody"
+        }
+      ],
+      "transform": {
+        "pitch": 0.0,
+        "position": [
+          0.0,
+          -0.0005109611083753407,
+          5.0
+        ],
+        "roll": 0.0,
+        "yaw": -0.8999999761581421
+      }
+    }
+  ]
+}

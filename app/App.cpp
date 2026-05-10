@@ -7,7 +7,8 @@
 App::App()
     : window(sf::VideoMode::getFullscreenModes().at(0), "Software Renderer", sf::State::Fullscreen),
     renderer(window.getSize().x, window.getSize().y),
-	fpsText(font, "", 20)
+	fpsText(font, "", 20),
+    prevPosition({ 0, 0, 0 })
 {
     camera.setFov(80.0f * 3.14159265f / 180.0f);
     font.openFromFile("C:/Windows/Fonts/arial.ttf");
@@ -78,12 +79,7 @@ void App::run() {
         }
 
         ImGui::SFML::Update(window, restart);
-
-        ImGui::ShowDemoWindow();
-
-        ImGui::Begin("Hello, world!");
-        ImGui::Button("Look at this pretty button");
-        ImGui::End();
+		editor.draw(scene);
 
 		float alpha = acc / fixedDT;
 
