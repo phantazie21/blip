@@ -23,6 +23,76 @@ static float distPointToSegment(ImVec2 p, ImVec2 a, ImVec2 b) {
     return std::sqrtf(dx * dx + dy * dy);
 }
 
+void Editor::updateGizmoHover(Scene& scene, int mouseX, int mouseY,
+    int screenW, int screenH, Object* cameraObj)
+{
+    if (activeGizmoAxis != GizmoAxis::None) return;
+
+    hoveredGizmoAxis = (gizmoMode == GizmoMode::Rotate)
+        ? pickRotateGizmo(scene, mouseX, mouseY, screenW, screenH, cameraObj)
+        : pickGizmoAxis(scene, mouseX, mouseY, screenW, screenH, cameraObj);
+}
+
+GizmoAxis Editor::pickRotateGizmo(Scene& scene, int mouseX, int mouseY,
+    int screenW, int screenH, Object* cameraObj)
+{
+    if (selectedObjectIndex < 0) return GizmoAxis::None;
+    Object* obj = scene.objects[selectedObjectIndex].get();
+    Camera* cam = cameraObj->getComponent<Camera>();
+    if (!cam) return GizmoAxis::None;
+
+    Mat4 view = cam->viewMatrix(cameraObj->transform);
+    Vec3 origin = obj->transform.position;
+    const float radius = 1.0f;
+    const int segments = 48;
+
+    auto project = [&](Vec3 w, ImVec2& out) -> bool {
+        Vec3 cs = view * w;
+        ScreenVert sv;
+        if (!cam->project(cs, screenW, screenH, sv)) return false;
+        out = ImVec2(sv.x, sv.y);
+        return true;
+        };
+
+    auto distToCircle = [&](Vec3 axis) -> float {
+        Vec3 u, v;
+        if (std::abs(axis.x) < 0.9f) u = normalize(cross(axis, Vec3{ 1, 0, 0 }));
+        else                          u = normalize(cross(axis, Vec3{ 0, 1, 0 }));
+        v = normalize(cross(axis, u));
+
+        ImVec2 mouse{ (float)mouseX, (float)mouseY };
+        float bestDist = std::numeric_limits<float>::max();
+
+        ImVec2 prev;
+        bool hasPrev = false;
+        for (int i = 0; i <= segments; i++) {
+            float a = (i / (float)segments) * 2.0f * 3.14159265f;
+            Vec3 p = origin + u * (std::cosf(a) * radius) + v * (std::sinf(a) * radius);
+            ImVec2 sp;
+            if (!project(p, sp)) { hasPrev = false; continue; }
+            if (hasPrev) {
+                float d = distPointToSegment(mouse, prev, sp);
+                if (d < bestDist) bestDist = d;
+            }
+            prev = sp;
+            hasPrev = true;
+        }
+        return bestDist;
+        };
+
+    const float hitRadius = 8.0f;
+    float dx = distToCircle({ 1, 0, 0 });
+    float dy = distToCircle({ 0, 1, 0 });
+    float dz = distToCircle({ 0, 0, 1 });
+
+    float best = hitRadius;
+    GizmoAxis hit = GizmoAxis::None;
+    if (dx < best) { best = dx; hit = GizmoAxis::X; }
+    if (dy < best) { best = dy; hit = GizmoAxis::Y; }
+    if (dz < best) { best = dz; hit = GizmoAxis::Z; }
+    return hit;
+}
+
 GizmoAxis Editor::pickGizmoAxis(Scene& scene, int mouseX, int mouseY,
     int screenW, int screenH, Object* cameraObj)
 {
@@ -62,7 +132,126 @@ GizmoAxis Editor::pickGizmoAxis(Scene& scene, int mouseX, int mouseY,
     return hit;
 }
 
-void Editor::updateGizmoDrag(Scene& scene, int mouseX, int mouseY,
+void Editor::updateGizmoRotateDrag(Scene& scene, int mouseX, int mouseY,
+    int screenW, int screenH, Object* cameraObj)
+{
+    if (activeGizmoAxis == GizmoAxis::None) return;
+    if (selectedObjectIndex < 0) { activeGizmoAxis = GizmoAxis::None; return; }
+
+    Object* obj = scene.objects[selectedObjectIndex].get();
+    Camera* cam = cameraObj->getComponent<Camera>();
+    if (!cam) return;
+    Mat4 view = cam->viewMatrix(cameraObj->transform);
+
+    auto project = [&](Vec3 w, ImVec2& out) -> bool {
+        Vec3 cs = view * w;
+        ScreenVert sv;
+        if (!cam->project(cs, screenW, screenH, sv)) return false;
+        out = ImVec2(sv.x, sv.y);
+        return true;
+        };
+
+    ImVec2 sOrigin;
+    if (!project(obj->transform.position, sOrigin)) return;
+
+    // vector from object center on screen to the mouse position
+    ImVec2 toMouse = {
+        gizmoLastMousePos.x - sOrigin.x,
+        gizmoLastMousePos.y - sOrigin.y
+    };
+    float toMouseLen = std::sqrtf(toMouse.x * toMouse.x + toMouse.y * toMouse.y);
+    if (toMouseLen < 1e-4f) return;
+
+    // tangent direction (perpendicular to toMouse, rotated 90° CCW)
+    ImVec2 tangent = { -toMouse.y / toMouseLen, toMouse.x / toMouseLen };
+
+    ImVec2 mouseDelta = {
+        (float)mouseX - gizmoLastMousePos.x,
+        (float)mouseY - gizmoLastMousePos.y
+    };
+
+    // how much the mouse moved tangentially -> angular delta
+    float dotMD = mouseDelta.x * tangent.x + mouseDelta.y * tangent.y;
+    const float radiansPerPixel = 0.01f;
+    float deltaAngle = dotMD * radiansPerPixel;
+
+    Vec3 axisWorld;
+    switch (activeGizmoAxis) {
+		case GizmoAxis::X: axisWorld = { 1, 0, 0 }; break;
+		case GizmoAxis::Y: axisWorld = { 0, 1, 0 }; break;
+		case GizmoAxis::Z: axisWorld = { 0, 0, 1 }; break;
+		default: return;
+    }
+
+    // vector from object to camera, in world space
+    Vec3 toCam = normalize(cameraObj->transform.position - obj->transform.position);
+    float facing = dot(axisWorld, toCam);
+    if (facing < 0) deltaAngle = -deltaAngle;
+
+    switch (activeGizmoAxis) {
+		case GizmoAxis::X: obj->transform.pitch += deltaAngle; break;
+        case GizmoAxis::Y: obj->transform.yaw -= deltaAngle; break;
+		case GizmoAxis::Z: obj->transform.roll += deltaAngle; break;
+		default: break;
+    }
+    gizmoLastMousePos = ImVec2((float)mouseX, (float)mouseY);
+}
+
+void Editor::updateGizmoScaleDrag(Scene& scene, int mouseX, int mouseY,
+    int screenW, int screenH, Object* cameraObj)
+{
+    if (activeGizmoAxis == GizmoAxis::None) return;
+    if (selectedObjectIndex < 0) { activeGizmoAxis = GizmoAxis::None; return; }
+
+    Object* obj = scene.objects[selectedObjectIndex].get();
+    Camera* cam = cameraObj->getComponent<Camera>();
+    if (!cam) return;
+    Mat4 view = cam->viewMatrix(cameraObj->transform);
+
+    Vec3 axisWorld;
+    switch (activeGizmoAxis) {
+    case GizmoAxis::X: axisWorld = { 1,0,0 }; break;
+    case GizmoAxis::Y: axisWorld = { 0,1,0 }; break;
+    case GizmoAxis::Z: axisWorld = { 0,0,1 }; break;
+    default: return;
+    }
+
+    // Project origin and origin+axis to screen
+    auto project = [&](Vec3 w, ImVec2& out) -> bool {
+        Vec3 cs = view * w;
+        ScreenVert sv;
+        if (!cam->project(cs, screenW, screenH, sv)) return false;
+        out = ImVec2(sv.x, sv.y);
+        return true;
+        };
+
+    ImVec2 sOrigin, sEnd;
+    if (!project(obj->transform.position, sOrigin)) return;
+    if (!project(obj->transform.position + axisWorld, sEnd)) return;
+
+    ImVec2 screenAxis = { sEnd.x - sOrigin.x, sEnd.y - sOrigin.y };
+    float lenSq = screenAxis.x * screenAxis.x + screenAxis.y * screenAxis.y;
+    if (lenSq < 1e-4f) return;
+
+    ImVec2 mouseDelta = {
+        (float)mouseX - gizmoLastMousePos.x,
+        (float)mouseY - gizmoLastMousePos.y
+    };
+
+    // amount the mouse moved along the screen-space axis,
+    // normalized to "world units per pixel along that axis"
+    float dotMD = mouseDelta.x * screenAxis.x + mouseDelta.y * screenAxis.y;
+    float deltaWorld = dotMD / lenSq;
+
+    obj->transform.scale = obj->transform.scale + axisWorld * deltaWorld;
+	obj->transform.scale.x = std::max(0.1f, obj->transform.scale.x);
+	obj->transform.scale.y = std::max(0.1f, obj->transform.scale.y);
+	obj->transform.scale.z = std::max(0.1f, obj->transform.scale.z);
+
+    gizmoLastMousePos = ImVec2((float)mouseX, (float)mouseY);
+}
+
+void Editor::updateGizmoTranslateDrag(Scene& scene, int mouseX, int mouseY,
     int screenW, int screenH, Object* cameraObj)
 {
     if (activeGizmoAxis == GizmoAxis::None) return;
@@ -186,6 +375,42 @@ void Editor::handleMouseClick(Scene& scene, int mouseX, int mouseY,
 	else selectedObjectIndex = -1;
 }
 
+static void drawCircle(ImDrawList* draw, const Mat4& view, const Camera* cam,
+    Vec3 center, Vec3 axis, float radius,
+    int screenW, int screenH, ImU32 color, float thickness)
+{
+    // Build two orthogonal vectors perpendicular to axis
+    Vec3 u, v;
+    if (std::abs(axis.x) < 0.9f) {
+        u = normalize(cross(axis, Vec3{ 1, 0, 0 }));
+    }
+    else {
+        u = normalize(cross(axis, Vec3{ 0, 1, 0 }));
+    }
+    v = normalize(cross(axis, u));
+
+    const int segments = 48;
+    ImVec2 lastPoint;
+    bool hasLast = false;
+
+    for (int i = 0; i <= segments; i++) {
+        float angle = (i / (float)segments) * 2.0f * 3.14159265f;
+        Vec3 point = center + u * (std::cosf(angle) * radius)
+            + v * (std::sinf(angle) * radius);
+        Vec3 cs = view * point;
+        ScreenVert sv;
+        if (cam->project(cs, screenW, screenH, sv)) {
+            ImVec2 sp(sv.x, sv.y);
+            if (hasLast) draw->AddLine(lastPoint, sp, color, thickness);
+            lastPoint = sp;
+            hasLast = true;
+        }
+        else {
+            hasLast = false;
+        }
+    }
+}
+
 void Editor::drawGizmo(Scene& scene, int screenW, int screenH, Object* cameraObj) {
     if (selectedObjectIndex < 0 || selectedObjectIndex >= (int)scene.objects.size()) return;
 
@@ -219,9 +444,25 @@ void Editor::drawGizmo(Scene& scene, int screenW, int screenH, Object* cameraObj
 
     ImDrawList* draw = ImGui::GetForegroundDrawList();
     const float thickness = 4.0f;
-    if (hasX) draw->AddLine(sOrigin, sX, IM_COL32(255, 60, 60, 255), thickness);
-    if (hasY) draw->AddLine(sOrigin, sY, IM_COL32(60, 255, 60, 255), thickness);
-    if (hasZ) draw->AddLine(sOrigin, sZ, IM_COL32(60, 60, 255, 255), thickness);
+    auto axisColor = [&](GizmoAxis axis, ImU32 normal, ImU32 highlight) {
+        return (activeGizmoAxis == axis || hoveredGizmoAxis == axis) ? highlight : normal;
+	};
+
+    ImU32 xColor = axisColor(GizmoAxis::X, IM_COL32(180, 40, 40, 255), IM_COL32(255, 100, 100, 255));
+    ImU32 yColor = axisColor(GizmoAxis::Y, IM_COL32(40, 180, 40, 255), IM_COL32(100, 255, 100, 255));
+    ImU32 zColor = axisColor(GizmoAxis::Z, IM_COL32(40, 40, 180, 255), IM_COL32(100, 100, 255, 255));
+
+    if (gizmoMode == GizmoMode::Rotate) {
+        const float radius = 1.0f;
+        drawCircle(draw, view, cam, origin, Vec3{ 1,0,0 }, radius, screenW, screenH, xColor, thickness);
+        drawCircle(draw, view, cam, origin, Vec3{ 0,1,0 }, radius, screenW, screenH, yColor, thickness);
+        drawCircle(draw, view, cam, origin, Vec3{ 0,0,1 }, radius, screenW, screenH, zColor, thickness);
+    }
+    else {
+        if (hasX) draw->AddLine(sOrigin, sX, xColor, thickness);
+        if (hasY) draw->AddLine(sOrigin, sY, yColor, thickness);
+        if (hasZ) draw->AddLine(sOrigin, sZ, zColor, thickness);
+    }
 }
 
 void Editor::drawSceneHierarchy(Scene& scene) {
@@ -256,6 +497,9 @@ void Editor::drawSceneHierarchy(Scene& scene) {
             selectedObjectIndex = i;
         }
     }
+    ImGui::Separator();
+    ImGui::Text("Mode: %s", gizmoMode == GizmoMode::Translate ? "Translate (W)" :
+		gizmoMode == GizmoMode::Rotate ? "Rotate (R)" : "Scale (S)");
     ImGui::End();
 }
 
@@ -276,6 +520,7 @@ void Editor::drawInspector(Scene& scene) {
         ImGui::DragFloat("Yaw", &obj->transform.yaw, 0.01f);
         ImGui::DragFloat("Pitch", &obj->transform.pitch, 0.01f);
         ImGui::DragFloat("Roll", &obj->transform.roll, 0.01f);
+		ImGui::DragFloat3("Scale", &obj->transform.scale.x, 0.1f);
     }
 
     // Components

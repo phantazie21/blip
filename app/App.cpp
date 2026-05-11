@@ -60,6 +60,7 @@ void App::run() {
 			auto* cam = camObj->addComponent<Camera>();
 			cam->setFov(80.0f * 3.14159265f / 180.0f);
 			scene.objects.push_back(std::move(camObj));
+			cameraObj = scene.findMainCameraObject();
         }
         input.beginFrame();
 		sf::Time restart = clock.restart();
@@ -92,10 +93,16 @@ void App::run() {
             acc -= fixedDT;
         }
 
+		if (!input.isMouseLocked()) {
+			if (input.isKeyPressed(sf::Keyboard::Scancode::W)) editor.gizmoMode = GizmoMode::Translate;
+			if (input.isKeyPressed(sf::Keyboard::Scancode::R)) editor.gizmoMode = GizmoMode::Rotate;
+			if (input.isKeyPressed(sf::Keyboard::Scancode::S)) editor.gizmoMode = GizmoMode::Scale;
+		}
+
 		scene.update(dt);
 
         bool mouseDown = input.isMouseButtonDown(sf::Mouse::Button::Left);
-        bool mousePressed = input.isMouseButtonPressed(sf::Mouse::Button::Left);  // edge: was up, now down
+        bool mousePressed = input.isMouseButtonPressed(sf::Mouse::Button::Left);
         bool wantUI = ImGui::GetIO().WantCaptureMouse;
 
         auto mp = input.getMousePosition();
@@ -103,7 +110,10 @@ void App::run() {
         int sw = window.getSize().x, sh = window.getSize().y;
 
         if (mousePressed && !wantUI) {
-            GizmoAxis axis = editor.pickGizmoAxis(scene, mx, my, sw, sh, cameraObj);
+            GizmoAxis axis = (editor.gizmoMode == GizmoMode::Rotate)
+                ? editor.pickRotateGizmo(scene, mx, my, sw, sh, cameraObj)
+                : editor.pickGizmoAxis(scene, mx, my, sw, sh, cameraObj);
+
             if (axis != GizmoAxis::None) {
                 editor.activeGizmoAxis = axis;
                 editor.gizmoLastMousePos = ImVec2((float)mx, (float)my);
@@ -114,13 +124,24 @@ void App::run() {
         }
 
         if (mouseDown && editor.activeGizmoAxis != GizmoAxis::None) {
-            editor.updateGizmoDrag(scene, mx, my, sw, sh, cameraObj);
+            switch (editor.gizmoMode) {
+            case GizmoMode::Translate:
+                editor.updateGizmoTranslateDrag(scene, mx, my, sw, sh, cameraObj);
+                break;
+            case GizmoMode::Rotate:
+                editor.updateGizmoRotateDrag(scene, mx, my, sw, sh, cameraObj);
+                break;
+            case GizmoMode::Scale:
+                editor.updateGizmoScaleDrag(scene, mx, my, sw, sh, cameraObj);
+                break;
+            }
         }
 
         if (!mouseDown) {
             editor.activeGizmoAxis = GizmoAxis::None;
         }
         ImGui::SFML::Update(window, restart);
+		editor.updateGizmoHover(scene, mx, my, sw, sh, cameraObj);
 		editor.draw(scene);
 		editor.drawGizmo(scene, window.getSize().x, window.getSize().y, cameraObj);
 
@@ -143,20 +164,22 @@ void App::fixedUpdate(float dt) {
 	auto cameraObj = scene.findMainCameraObject();
     if (!cameraObj) return;
     scene.fixedUpdate(dt);
-	const float step = 0.05f;
-	Vec3 forward = { std::sinf(-cameraObj->transform.yaw), 0, std::cosf(-cameraObj->transform.yaw) };
-	Vec3 right = { forward.z, 0, -forward.x };
-	Vec3 move = {};
-	if (input.isKeyDown(sf::Keyboard::Scancode::W)) move = move + forward;
-	if (input.isKeyDown(sf::Keyboard::Scancode::S)) move = move - forward;
-	if (input.isKeyDown(sf::Keyboard::Scancode::A)) move = move - right;
-	if (input.isKeyDown(sf::Keyboard::Scancode::D)) move = move + right;
+    if (input.isMouseLocked()) {
+        const float step = 0.05f;
+        Vec3 forward = { std::sinf(-cameraObj->transform.yaw), 0, std::cosf(-cameraObj->transform.yaw) };
+        Vec3 right = { forward.z, 0, -forward.x };
+        Vec3 move = {};
+        if (input.isKeyDown(sf::Keyboard::Scancode::W)) move = move + forward;
+        if (input.isKeyDown(sf::Keyboard::Scancode::S)) move = move - forward;
+        if (input.isKeyDown(sf::Keyboard::Scancode::A)) move = move - right;
+        if (input.isKeyDown(sf::Keyboard::Scancode::D)) move = move + right;
 
-	float len = length(move);
-	if (len > 0.0f) cameraObj->transform.position = cameraObj->transform.position + (move / len) * step;
+        float len = length(move);
+        if (len > 0.0f) cameraObj->transform.position = cameraObj->transform.position + (move / len) * step;
 
-	if (input.isKeyDown(sf::Keyboard::Scancode::E)) cameraObj->transform.position.y += step;
-	if (input.isKeyDown(sf::Keyboard::Scancode::Q)) cameraObj->transform.position.y -= step;
+        if (input.isKeyDown(sf::Keyboard::Scancode::E)) cameraObj->transform.position.y += step;
+        if (input.isKeyDown(sf::Keyboard::Scancode::Q)) cameraObj->transform.position.y -= step;
+    }
 }
 
 void App::render() {

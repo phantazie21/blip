@@ -11,10 +11,11 @@ struct Object {
 	std::vector<std::unique_ptr<Component>> components;
 
     Mat4 worldMatrix() const {
-		return translation(transform.position)
-			* rotateXY(transform.roll)
-			* rotateYZ(transform.pitch)
-			* rotateXZ(transform.yaw);
+        return translation(transform.position)
+            * rotateXY(transform.roll)
+            * rotateYZ(transform.pitch)
+            * rotateXZ(transform.yaw)
+            * scale(transform.scale);
     }
 	
     template<typename T, typename... Args>
@@ -39,7 +40,8 @@ struct Object {
             {"position", {transform.position.x, transform.position.y, transform.position.z}},
             {"yaw",   transform.yaw},
             {"pitch", transform.pitch},
-            {"roll",  transform.roll}
+            {"roll",  transform.roll},
+            {"scale", {transform.scale.x, transform.scale.y, transform.scale.z}}
         };
         json comps = json::array();
         for (const auto& c : components) {
@@ -59,6 +61,11 @@ struct Object {
         transform.yaw = t.value("yaw", 0.0f);
         transform.pitch = t.value("pitch", 0.0f);
         transform.roll = t.value("roll", 0.0f);
+		auto s = t["scale"];
+        if (!s.is_array() || s.size() != 3) {
+			s = { 1, 1, 1 };
+        }
+		transform.scale = { s[0], s[1], s[2] };
 
         components.clear();
         for (const auto& c : j["components"]) {

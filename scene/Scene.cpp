@@ -183,8 +183,13 @@ void Scene::render(Renderer& r) {
 		if (!mr || !mr->mesh) continue;
 		const Mat4 world = obj->worldMatrix();
 		Mat4 mv = view * world;
+		float maxScale = std::max({
+			std::abs(obj->transform.scale.x),
+			std::abs(obj->transform.scale.y),
+			std::abs(obj->transform.scale.z)
+		});
 		Vec3 camCenter = mv * mr->mesh->bounds.center;
-		if (!isSphereVisible(camCenter, mr->mesh->bounds.radius, cam->fov, aspect)) continue;
+		//if (!isSphereVisible(camCenter, mr->mesh->bounds.radius * maxScale, cam->fov, aspect)) continue;
 		Mesh* mesh = mr->mesh.get();
 		if (!mr->lods.empty()) {
 			int lodCount = (int)mr->lods.size();

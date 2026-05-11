@@ -55,7 +55,7 @@ void Renderer::workerLoop(int t) {
 void Renderer::submitDrawCall(const DrawCall& dc) {
 	DrawCall dcCopy = dc;
 	dcCopy.submitId = nextSubmitId++;
-	drawCalls.push_back(dc);
+	drawCalls.push_back(dcCopy);
 }
 
 void Renderer::flush() {

@@ -4,4 +4,5 @@
 struct Transform {
     Vec3  position = {};
     float yaw = 0, pitch = 0, roll = 0;
+	Vec3 scale = { 1, 1, 1 };
 };
