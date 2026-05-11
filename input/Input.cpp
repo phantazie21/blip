@@ -2,6 +2,7 @@
 
 void Input::beginFrame() {
 	previous = current;
+	mouse_previous = mouse_current;
 }
 
 void Input::setMouseLocked(bool locked, sf::RenderWindow& window, sf::Vector2i center) {
@@ -37,7 +38,19 @@ bool Input::isMouseLocked() const {
 void Input::resetMouseDelta() { mouseDelta = { 0, 0 }; }
 
 bool Input::isMouseButtonDown(sf::Mouse::Button button) const {
-	return sf::Mouse::isButtonPressed(button);
+	auto it = mouse_current.find(button);
+	return it != mouse_current.end() && it->second;
+}
+
+bool Input::isMouseButtonPressed(sf::Mouse::Button button) const {
+	auto it = mouse_current.find(button);
+	auto prevIt = mouse_previous.find(button);
+	return (it != mouse_current.end() && it->second) && !(prevIt != mouse_previous.end() && prevIt->second);
+}
+
+bool Input::isMouseButtonReleased(sf::Mouse::Button button) const {
+	auto prevIt = mouse_previous.find(button);
+	return !(mouse_current.find(button) != mouse_current.end() && mouse_current.at(button)) && (prevIt != mouse_previous.end() && prevIt->second);
 }
 
 void Input::onEvent(const std::optional<sf::Event>& event, sf::RenderWindow& window) {
@@ -52,6 +65,14 @@ void Input::onEvent(const std::optional<sf::Event>& event, sf::RenderWindow& win
 	else if (const auto* keyReleased = event->getIf<sf::Event::KeyReleased>())
 	{
 		current[keyReleased->scancode] = false;
+	}
+	else if (const auto* mouseButtonPressed = event->getIf<sf::Event::MouseButtonPressed>())
+	{
+		mouse_current[mouseButtonPressed->button] = true;
+	}
+	else if (const auto* mouseButtonReleased = event->getIf<sf::Event::MouseButtonReleased>())
+	{
+		mouse_current[mouseButtonReleased->button] = false;
 	}
 	else if (event->is<sf::Event::MouseMoved>())
 	{

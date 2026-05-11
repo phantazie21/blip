@@ -8,6 +8,222 @@ void Editor::draw(Scene& scene) {
     drawInspector(scene);
 }
 
+static float distPointToSegment(ImVec2 p, ImVec2 a, ImVec2 b) {
+    ImVec2 ab = { b.x - a.x, b.y - a.y };
+    ImVec2 ap = { p.x - a.x, p.y - a.y };
+    float lenSq = ab.x * ab.x + ab.y * ab.y;
+    if (lenSq < 1e-6f) {
+        float dx = p.x - a.x, dy = p.y - a.y;
+        return std::sqrtf(dx * dx + dy * dy);
+    }
+    float t = (ap.x * ab.x + ap.y * ab.y) / lenSq;
+    t = std::clamp(t, 0.0f, 1.0f);
+    ImVec2 proj = { a.x + ab.x * t, a.y + ab.y * t };
+    float dx = p.x - proj.x, dy = p.y - proj.y;
+    return std::sqrtf(dx * dx + dy * dy);
+}
+
+GizmoAxis Editor::pickGizmoAxis(Scene& scene, int mouseX, int mouseY,
+    int screenW, int screenH, Object* cameraObj)
+{
+    if (selectedObjectIndex < 0) return GizmoAxis::None;
+    Object* obj = scene.objects[selectedObjectIndex].get();
+    Camera* cam = cameraObj->getComponent<Camera>();
+    if (!cam) return GizmoAxis::None;
+
+    Mat4 view = cam->viewMatrix(cameraObj->transform);
+
+    auto project = [&](Vec3 w, ImVec2& out) -> bool {
+        Vec3 cs = view * w;
+        ScreenVert sv;
+        if (!cam->project(cs, screenW, screenH, sv)) return false;
+        out = ImVec2(sv.x, sv.y);
+        return true;
+        };
+
+    ImVec2 sOrigin, sX, sY, sZ;
+    if (!project(obj->transform.position, sOrigin)) return GizmoAxis::None;
+    project(obj->transform.position + Vec3{ 1,0,0 }, sX);
+    project(obj->transform.position + Vec3{ 0,1,0 }, sY);
+    project(obj->transform.position + Vec3{ 0,0,1 }, sZ);
+
+    ImVec2 mouse{ (float)mouseX, (float)mouseY };
+    const float hitRadius = 8.0f;
+
+    float dx = distPointToSegment(mouse, sOrigin, sX);
+    float dy = distPointToSegment(mouse, sOrigin, sY);
+    float dz = distPointToSegment(mouse, sOrigin, sZ);
+
+    float best = hitRadius;
+    GizmoAxis hit = GizmoAxis::None;
+    if (dx < best) { best = dx; hit = GizmoAxis::X; }
+    if (dy < best) { best = dy; hit = GizmoAxis::Y; }
+    if (dz < best) { best = dz; hit = GizmoAxis::Z; }
+    return hit;
+}
+
+void Editor::updateGizmoDrag(Scene& scene, int mouseX, int mouseY,
+    int screenW, int screenH, Object* cameraObj)
+{
+    if (activeGizmoAxis == GizmoAxis::None) return;
+    if (selectedObjectIndex < 0) { activeGizmoAxis = GizmoAxis::None; return; }
+
+    Object* obj = scene.objects[selectedObjectIndex].get();
+    Camera* cam = cameraObj->getComponent<Camera>();
+    if (!cam) return;
+    Mat4 view = cam->viewMatrix(cameraObj->transform);
+
+    Vec3 axisWorld;
+    switch (activeGizmoAxis) {
+    case GizmoAxis::X: axisWorld = { 1,0,0 }; break;
+    case GizmoAxis::Y: axisWorld = { 0,1,0 }; break;
+    case GizmoAxis::Z: axisWorld = { 0,0,1 }; break;
+    default: return;
+    }
+
+    // Project origin and origin+axis to screen
+    auto project = [&](Vec3 w, ImVec2& out) -> bool {
+        Vec3 cs = view * w;
+        ScreenVert sv;
+        if (!cam->project(cs, screenW, screenH, sv)) return false;
+        out = ImVec2(sv.x, sv.y);
+        return true;
+        };
+
+    ImVec2 sOrigin, sEnd;
+    if (!project(obj->transform.position, sOrigin)) return;
+    if (!project(obj->transform.position + axisWorld, sEnd)) return;
+
+    ImVec2 screenAxis = { sEnd.x - sOrigin.x, sEnd.y - sOrigin.y };
+    float lenSq = screenAxis.x * screenAxis.x + screenAxis.y * screenAxis.y;
+    if (lenSq < 1e-4f) return;
+
+    ImVec2 mouseDelta = {
+        (float)mouseX - gizmoLastMousePos.x,
+        (float)mouseY - gizmoLastMousePos.y
+    };
+
+    // amount the mouse moved along the screen-space axis,
+    // normalized to "world units per pixel along that axis"
+    float dotMD = mouseDelta.x * screenAxis.x + mouseDelta.y * screenAxis.y;
+    float deltaWorld = dotMD / lenSq;
+
+    obj->transform.position = obj->transform.position + axisWorld * deltaWorld;
+
+    gizmoLastMousePos = ImVec2((float)mouseX, (float)mouseY);
+}
+
+static float rayAABB(Vec3 rayOrigin, Vec3 rayDir, Vec3 boxMin, Vec3 boxMax) {
+    float tMin = 0.0f;
+    float tMax = std::numeric_limits<float>::max();
+    for (int i = 0; i < 3; i++) {
+        float ro = (&rayOrigin.x)[i];
+        float rd = (&rayDir.x)[i];
+        float bmin = (&boxMin.x)[i];
+        float bmax = (&boxMax.x)[i];
+        if (std::abs(rd) < 1e-8f) {
+            if (ro < bmin || ro > bmax) return -1.0f;
+        }
+        else {
+            float t1 = (bmin - ro) / rd;
+            float t2 = (bmax - ro) / rd;
+            if (t1 > t2) std::swap(t1, t2);
+            tMin = std::max(tMin, t1);
+            tMax = std::min(tMax, t2);
+            if (tMin > tMax) return -1.0f;
+        }
+    }
+    return tMin;
+}
+
+void Editor::handleMouseClick(Scene& scene, int mouseX, int mouseY,
+    int screenW, int screenH, Object* cameraObj)
+{
+    Camera* cam = cameraObj->getComponent<Camera>();
+    if (!cam) return;
+    Mat4 view = cam->viewMatrix(cameraObj->transform);
+
+    int bestHit = -1;
+    float bestDist = std::numeric_limits<float>::max();
+
+    for (size_t i = 0; i < scene.objects.size(); i++) {
+        Object* obj = scene.objects[i].get();
+        auto* bc = obj->getComponent<BoxCollider>();
+        if (!bc) continue;
+
+        // Project center to screen
+        Vec3 camSpace = view * obj->transform.position;
+        ScreenVert sv;
+        if (!cam->project(camSpace, screenW, screenH, sv)) continue;
+
+        // Project corners of AABB to get approximate screen rect
+        float minSX = FLT_MAX, maxSX = -FLT_MAX, minSY = FLT_MAX, maxSY = -FLT_MAX;
+        for (int dx = -1; dx <= 1; dx += 2)
+            for (int dy = -1; dy <= 1; dy += 2)
+                for (int dz = -1; dz <= 1; dz += 2) {
+                    Vec3 corner = obj->transform.position + Vec3{
+                        bc->halfExtents.x * dx,
+                        bc->halfExtents.y * dy,
+                        bc->halfExtents.z * dz
+                    };
+                    Vec3 cs = view * corner;
+                    ScreenVert cv;
+                    if (cam->project(cs, screenW, screenH, cv)) {
+                        minSX = std::min(minSX, cv.x);
+                        maxSX = std::max(maxSX, cv.x);
+                        minSY = std::min(minSY, cv.y);
+                        maxSY = std::max(maxSY, cv.y);
+                    }
+                }
+
+        if (mouseX >= minSX && mouseX <= maxSX && mouseY >= minSY && mouseY <= maxSY && camSpace.z < bestDist) {
+            bestDist = camSpace.z;
+            bestHit = (int)i;
+        }
+    }
+
+    if (bestHit >= 0) selectedObjectIndex = bestHit;
+	else selectedObjectIndex = -1;
+}
+
+void Editor::drawGizmo(Scene& scene, int screenW, int screenH, Object* cameraObj) {
+    if (selectedObjectIndex < 0 || selectedObjectIndex >= (int)scene.objects.size()) return;
+
+    Object* obj = scene.objects[selectedObjectIndex].get();
+    Camera* cam = cameraObj->getComponent<Camera>();
+    if (!cam) return;
+
+    Mat4 view = cam->viewMatrix(cameraObj->transform);
+
+    // World-space axis endpoints
+    const float axisLength = 1.0f;
+    Vec3 origin = obj->transform.position;
+    Vec3 xEndPos = origin + Vec3{ axisLength, 0, 0 };
+    Vec3 yEndPos = origin + Vec3{ 0, axisLength, 0 };
+    Vec3 zEndPos = origin + Vec3{ 0, 0, axisLength };
+
+    // Project to screen
+    auto projectPoint = [&](Vec3 worldPos, ImVec2& out) -> bool {
+        Vec3 camSpace = view * worldPos;
+        ScreenVert sv;
+        if (!cam->project(camSpace, screenW, screenH, sv)) return false;
+        out = ImVec2(sv.x, sv.y);
+        return true;
+	};
+
+    ImVec2 sOrigin, sX, sY, sZ;
+    if (!projectPoint(origin, sOrigin)) return;
+    bool hasX = projectPoint(xEndPos, sX);
+    bool hasY = projectPoint(yEndPos, sY);
+    bool hasZ = projectPoint(zEndPos, sZ);
+
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    const float thickness = 4.0f;
+    if (hasX) draw->AddLine(sOrigin, sX, IM_COL32(255, 60, 60, 255), thickness);
+    if (hasY) draw->AddLine(sOrigin, sY, IM_COL32(60, 255, 60, 255), thickness);
+    if (hasZ) draw->AddLine(sOrigin, sZ, IM_COL32(60, 60, 255, 255), thickness);
+}
+
 void Editor::drawSceneHierarchy(Scene& scene) {
     ImGui::Begin("Scene");
     if (ImGui::Button("Save")) scene.save("scene.json");

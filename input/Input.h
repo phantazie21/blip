@@ -13,6 +13,8 @@ public:
     bool isKeyReleased(sf::Keyboard::Scancode key) const;
 
     bool isMouseButtonDown(sf::Mouse::Button button) const;
+    bool isMouseButtonPressed(sf::Mouse::Button button) const;
+    bool isMouseButtonReleased(sf::Mouse::Button button) const;
     bool isMouseLocked() const;
     void setMouseLocked(bool locked, sf::RenderWindow& window, sf::Vector2i center);
 	sf::Vector2i getMouseDelta() const { return mouseDelta; }
@@ -23,6 +25,8 @@ public:
 private:
     std::unordered_map<sf::Keyboard::Scancode, bool> current;
     std::unordered_map<sf::Keyboard::Scancode, bool> previous;
+    std::unordered_map<sf::Mouse::Button, bool> mouse_current;
+    std::unordered_map<sf::Mouse::Button, bool> mouse_previous;
     sf::Vector2i  windowCenter;
     bool          mouseLocked = false;
     sf::Vector2i mouseDelta;

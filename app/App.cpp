@@ -94,8 +94,35 @@ void App::run() {
 
 		scene.update(dt);
 
+        bool mouseDown = input.isMouseButtonDown(sf::Mouse::Button::Left);
+        bool mousePressed = input.isMouseButtonPressed(sf::Mouse::Button::Left);  // edge: was up, now down
+        bool wantUI = ImGui::GetIO().WantCaptureMouse;
+
+        auto mp = input.getMousePosition();
+        int mx = mp.x, my = mp.y;
+        int sw = window.getSize().x, sh = window.getSize().y;
+
+        if (mousePressed && !wantUI) {
+            GizmoAxis axis = editor.pickGizmoAxis(scene, mx, my, sw, sh, cameraObj);
+            if (axis != GizmoAxis::None) {
+                editor.activeGizmoAxis = axis;
+                editor.gizmoLastMousePos = ImVec2((float)mx, (float)my);
+            }
+            else {
+                editor.handleMouseClick(scene, mx, my, sw, sh, cameraObj);
+            }
+        }
+
+        if (mouseDown && editor.activeGizmoAxis != GizmoAxis::None) {
+            editor.updateGizmoDrag(scene, mx, my, sw, sh, cameraObj);
+        }
+
+        if (!mouseDown) {
+            editor.activeGizmoAxis = GizmoAxis::None;
+        }
         ImGui::SFML::Update(window, restart);
 		editor.draw(scene);
+		editor.drawGizmo(scene, window.getSize().x, window.getSize().y, cameraObj);
 
 		float alpha = acc / fixedDT;
 
